@@ -2,26 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  body {
+    @apply antialiased;
+  }
+  
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  .btn-primary {
+    @apply bg-tac-accent text-tac-bg font-semibold px-6 py-2.5 rounded-lg hover:bg-tac-accent-hover transition-colors duration-200;
+  }
+  .btn-secondary {
+    @apply border border-tac-accent text-tac-accent font-semibold px-6 py-2.5 rounded-lg hover:bg-tac-accent hover:text-tac-bg transition-colors duration-200;
+  }
+  .card {
+    @apply bg-tac-bg-card border border-tac-border rounded-xl p-6;
+  }
+  .input-field {
+    @apply bg-tac-bg border border-tac-border rounded-lg px-4 py-2.5 text-tac-text placeholder-tac-muted focus:outline-none focus:border-tac-accent focus:ring-1 focus:ring-tac-accent transition-colors w-full;
+  }
+  .label-text {
+    @apply text-sm font-medium text-tac-muted mb-1 block;
+  }
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .card {
+    border: 1px solid #ddd !important;
+    background: white !important;
+    break-inside: avoid;
+  }
+  .print-break {
+    page-break-before: always;
   }
 }

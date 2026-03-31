@@ -9,8 +9,22 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
+        tac: {
+          bg: "#1A2A35",
+          "bg-light": "#243544",
+          "bg-card": "#1F3040",
+          accent: "#F5B36B",
+          "accent-hover": "#F7C48A",
+          text: "#FFFFFF",
+          muted: "#A0AEB8",
+          border: "#2D4050",
+          success: "#4ADE80",
+          warning: "#FBBF24",
+          danger: "#F87171",
+        },
+      },
+      fontFamily: {
+        poppins: ["Poppins", "sans-serif"],
       },
     },
   },
