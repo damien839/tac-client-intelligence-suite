@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Nav from "@/components/shared/Nav";
 import CsvUploader from "@/components/shared/CsvUploader";
 import InputField from "@/components/shared/InputField";
@@ -120,6 +120,34 @@ export default function AuditPage() {
       })),
     [carrierComparison]
   );
+
+  // Auto-save results to localStorage for the Report page
+  useEffect(() => {
+    const profile = JSON.parse(localStorage.getItem("tac-client-profile") || "{}");
+    // Find top 3 benchmark gaps (warehouse metrics scored as red or amber)
+    const gaps = warehouseScorecard
+      .filter((row) => row.score !== "green")
+      .sort((a, b) => {
+        // Sort by severity: red first, then amber
+        if (a.score === "red" && b.score !== "red") return -1;
+        if (a.score !== "red" && b.score === "red") return 1;
+        return 0;
+      })
+      .slice(0, 3)
+      .map((row) => `${row.label}: ${row.clientValue} ${row.unit} (benchmark: ${row.low}–${row.high} ${row.unit})`);
+    localStorage.setItem(
+      "tac_audit_results",
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        clientName: profile.clientName || "",
+        totalSavingsOpportunity: totalSavings,
+        carrierSavings: totalCarrierSavings,
+        warehouseSavings: totalWarehouseSavings,
+        topBenchmarkGaps: gaps,
+        monthlyOrders,
+      })
+    );
+  }, [totalSavings, totalCarrierSavings, totalWarehouseSavings, warehouseScorecard, monthlyOrders]);
 
   const scoreColor = (score: "green" | "amber" | "red") => {
     switch (score) {

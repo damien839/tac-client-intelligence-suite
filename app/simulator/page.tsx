@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import Nav from "@/components/shared/Nav";
 import CsvUploader from "@/components/shared/CsvUploader";
 import InputField from "@/components/shared/InputField";
@@ -203,6 +203,32 @@ export default function SimulatorPage() {
   const updateEconomics = (key: keyof UnitEconomics, value: number) => {
     setEconomics((prev) => ({ ...prev, [key]: value }));
   };
+
+  // Auto-save results to localStorage for the Report page
+  useEffect(() => {
+    if (!currentScenario || !optimal) return;
+    const profile = JSON.parse(localStorage.getItem("tac-client-profile") || "{}");
+    const carrierSummary = Object.entries(currentScenario.carrierSplit)
+      .map(([name, counts]) => `${name}: ${Math.round(counts.paying + counts.free)} orders`)
+      .join(", ");
+    localStorage.setItem(
+      "tac_simulator_results",
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        clientName: profile.clientName || "",
+        optimalThreshold: optimal.threshold,
+        optimalProfit: optimal.profit,
+        currentThreshold,
+        proposedThreshold,
+        currentProfit: currentScenario.totalProfit,
+        proposedProfit: proposedScenario?.totalProfit ?? 0,
+        profitDelta: (proposedScenario?.totalProfit ?? 0) - currentScenario.totalProfit,
+        carrierSplitSummary: carrierSummary,
+        totalOrders: currentScenario.totalOrders,
+        avgProfitPerOrder: currentScenario.avgProfitPerOrder,
+      })
+    );
+  }, [currentScenario, proposedScenario, optimal, currentThreshold, proposedThreshold]);
 
   return (
     <>

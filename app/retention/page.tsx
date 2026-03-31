@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Nav from "@/components/shared/Nav";
 import InputField from "@/components/shared/InputField";
 import MetricCard from "@/components/shared/MetricCard";
@@ -50,6 +50,27 @@ export default function RetentionPage() {
   };
 
   const result = useMemo(() => computeRetention(inputs), [inputs]);
+
+  // Auto-save results to localStorage for the Report page
+  useEffect(() => {
+    const profile = JSON.parse(localStorage.getItem("tac-client-profile") || "{}");
+    localStorage.setItem(
+      "tac_retention_results",
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        clientName: profile.clientName || "",
+        currentEbit: result.currentEbit,
+        proposedEbit: result.proposedEbit,
+        ebitUplift: result.ebitUplift,
+        ebitUpliftPercent: result.ebitUpliftPercent,
+        annualEbitUplift: result.ebitUplift * 12,
+        breakEvenMonths: result.breakEvenMonths,
+        tacMonthlyFee: inputs.tacMonthlyFee,
+        currentBlendedCac: result.currentBlendedCac,
+        proposedBlendedCac: result.proposedBlendedCac,
+      })
+    );
+  }, [result, inputs.tacMonthlyFee]);
 
   const chartData = result.monthlyProjection.map((m) => ({
     month: `M${m.month}`,
