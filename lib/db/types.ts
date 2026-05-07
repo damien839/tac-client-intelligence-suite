@@ -82,3 +82,28 @@ export interface FreightRateCardLine {
   notes: string | null;
   created_at: string;
 }
+
+export type VolumeSource = "manual_csv" | "billing_extract";
+
+export interface FreightShipmentVolume {
+  id: string;
+  tenant_id: string;
+  carrier_id: string;
+  service_level: string;
+  zone_label: string;
+  monthly_shipments: number;
+  avg_charge_aud: number;
+  avg_weight_kg: number | null;
+  period_label: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  source: VolumeSource;
+  source_upload_id: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FreightShipmentVolumeWithCarrier extends FreightShipmentVolume {
+  carrier: Pick<Carrier, "id" | "name" | "code">;
+}

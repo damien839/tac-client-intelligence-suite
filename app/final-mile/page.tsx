@@ -22,8 +22,9 @@ const tabs: { key: TabKey; label: string; description: string }[] = [
   },
   {
     key: "billing",
-    label: "Billing",
-    description: "Carrier billing reports — coming soon.",
+    label: "Current Volume",
+    description:
+      "Current monthly shipment volume + charges by carrier, service, and zone. CSV upload now; billing-PDF extraction in phase 2.",
   },
 ];
 
