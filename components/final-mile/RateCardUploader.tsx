@@ -119,45 +119,6 @@ export default function RateCardUploader({
     [ingestRows]
   );
 
-  const handleExcel = useCallback(
-    async (file: File) => {
-      setParsing("excel");
-      try {
-        const XLSX = await import("xlsx");
-        const buf = await file.arrayBuffer();
-        const wb = XLSX.read(buf, { type: "array" });
-        const sheetName = wb.SheetNames[0];
-        if (!sheetName) {
-          setParseError("No sheets found in workbook");
-          return;
-        }
-        const sheet = wb.Sheets[sheetName];
-        const rowsRaw: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, {
-          defval: "",
-          raw: false,
-        });
-        const stringified: Record<string, string>[] = rowsRaw.map((r) => {
-          const out: Record<string, string> = {};
-          for (const [k, v] of Object.entries(r)) {
-            out[k] = v == null ? "" : String(v);
-          }
-          return out;
-        });
-        const rows: DraftLine[] = stringified
-          .map((row, idx) => mapCsvRow(row, idx))
-          .filter((r): r is DraftLine => r !== null);
-        ingestRows(rows, `${file.name} → ${sheetName}`);
-      } catch (e: unknown) {
-        setParseError(
-          e instanceof Error ? `Excel parse failed: ${e.message}` : "Excel parse failed"
-        );
-      } finally {
-        setParsing(null);
-      }
-    },
-    [ingestRows]
-  );
-
   const handleAiExtract = useCallback(
     async (file: File) => {
       setParsing("ai");
@@ -188,6 +149,50 @@ export default function RateCardUploader({
       }
     },
     [ingestRows]
+  );
+
+  const handleExcel = useCallback(
+    async (file: File) => {
+      setParsing("excel");
+      try {
+        const XLSX = await import("xlsx");
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const sheetName = wb.SheetNames[0];
+        if (!sheetName) {
+          setParseError("No sheets found in workbook");
+          return;
+        }
+        const sheet = wb.Sheets[sheetName];
+        const rowsRaw: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, {
+          defval: "",
+          raw: false,
+        });
+        const stringified: Record<string, string>[] = rowsRaw.map((r) => {
+          const out: Record<string, string> = {};
+          for (const [k, v] of Object.entries(r)) {
+            out[k] = v == null ? "" : String(v);
+          }
+          return out;
+        });
+        const rows: DraftLine[] = stringified
+          .map((row, idx) => mapCsvRow(row, idx))
+          .filter((r): r is DraftLine => r !== null);
+        if (rows.length === 0) {
+          setParsing(null);
+          await handleAiExtract(file);
+          return;
+        }
+        ingestRows(rows, `${file.name} → ${sheetName}`);
+      } catch (e: unknown) {
+        setParseError(
+          e instanceof Error ? `Excel parse failed: ${e.message}` : "Excel parse failed"
+        );
+      } finally {
+        setParsing((p) => (p === "excel" ? null : p));
+      }
+    },
+    [ingestRows, handleAiExtract]
   );
 
   const handleFile = useCallback(
@@ -699,18 +704,18 @@ function detectFileKind(file: File): "csv" | "excel" | "ai" | null {
   const mime = file.type.toLowerCase();
   if (mime === "text/csv" || name.endsWith(".csv")) return "csv";
   if (
+    mime === "application/pdf" ||
+    mime.startsWith("image/") ||
+    /\.(pdf|png|jpe?g|webp|gif)$/.test(name)
+  )
+    return "ai";
+  if (
     mime.includes("spreadsheetml") ||
     mime === "application/vnd.ms-excel" ||
     name.endsWith(".xlsx") ||
     name.endsWith(".xls")
   )
     return "excel";
-  if (
-    mime === "application/pdf" ||
-    mime.startsWith("image/") ||
-    /\.(pdf|png|jpe?g|webp|gif)$/.test(name)
-  )
-    return "ai";
   return null;
 }
 

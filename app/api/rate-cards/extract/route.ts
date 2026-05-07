@@ -81,16 +81,32 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           error:
-            "Unsupported file type. Use PDF or image (PNG/JPEG/WEBP/GIF).",
+            "Unsupported file type. Use Excel, PDF or image (PNG/JPEG/WEBP/GIF).",
         },
         { status: 415 }
       );
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString("base64");
 
     const anthropic = getAnthropic();
+    const userContent =
+      mediaType.kind === "spreadsheet"
+        ? [
+            {
+              type: "text" as const,
+              text: `${USER_PROMPT}\n\nFile name: ${file.name}\n\n${await spreadsheetToText(arrayBuffer)}`,
+            },
+          ]
+        : [
+            buildFileBlock(
+              mediaType.kind,
+              mediaType.media,
+              Buffer.from(arrayBuffer).toString("base64")
+            ),
+            { type: "text" as const, text: USER_PROMPT },
+          ];
+
     const message = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 8000,
@@ -99,10 +115,7 @@ export async function POST(req: Request) {
       messages: [
         {
           role: "user",
-          content: [
-            buildFileBlock(mediaType.kind, mediaType.media, base64),
-            { type: "text", text: USER_PROMPT },
-          ],
+          content: userContent,
         },
       ],
     });
@@ -128,13 +141,17 @@ export async function POST(req: Request) {
   }
 }
 
-type FileKind = "document" | "image";
+type FileKind = "document" | "image" | "spreadsheet";
 type DocumentMedia = "application/pdf";
 type ImageMedia = "image/png" | "image/jpeg" | "image/webp" | "image/gif";
 
 function resolveMediaType(
   file: File
-): { kind: "document"; media: DocumentMedia } | { kind: "image"; media: ImageMedia } | null {
+):
+  | { kind: "document"; media: DocumentMedia }
+  | { kind: "image"; media: ImageMedia }
+  | { kind: "spreadsheet"; media: "spreadsheet" }
+  | null {
   const name = file.name.toLowerCase();
   const mime = file.type.toLowerCase();
   if (mime === "application/pdf" || name.endsWith(".pdf")) {
@@ -152,7 +169,28 @@ function resolveMediaType(
   if (mime === "image/gif" || name.endsWith(".gif")) {
     return { kind: "image", media: "image/gif" };
   }
+  if (
+    mime.includes("spreadsheetml") ||
+    mime === "application/vnd.ms-excel" ||
+    name.endsWith(".xlsx") ||
+    name.endsWith(".xls")
+  ) {
+    return { kind: "spreadsheet", media: "spreadsheet" };
+  }
   return null;
+}
+
+async function spreadsheetToText(arrayBuffer: ArrayBuffer): Promise<string> {
+  const XLSX = await import("xlsx");
+  const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: "array" });
+  const blocks: string[] = [];
+  for (const name of wb.SheetNames) {
+    const sheet = wb.Sheets[name];
+    if (!sheet) continue;
+    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+    blocks.push(`### Sheet: ${name}\n${csv.trim()}`);
+  }
+  return blocks.join("\n\n");
 }
 
 function buildFileBlock(kind: FileKind, mediaType: string, base64: string) {
