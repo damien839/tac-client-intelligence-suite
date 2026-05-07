@@ -25,22 +25,33 @@ const STATUS_LABELS: Record<RateCardStatus, string> = {
   archived: "archived",
 };
 
+interface TransformLogEntry {
+  at: string;
+  instruction: string;
+  summary: string;
+  warnings: string[];
+  lines_before: number;
+  lines_applied: number;
+}
+
 export default function RateCardCard({ card, onChanged }: RateCardCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [label, setLabel] = useState(card.label ?? "");
-  const [notes, setNotes] = useState(card.notes ?? "");
   const [fuelPct, setFuelPct] = useState(
     card.fuel_surcharge_percent !== null ? String(card.fuel_surcharge_percent) : ""
   );
   const [savingState, setSavingState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [instruction, setInstruction] = useState("");
+  const [running, setRunning] = useState(false);
+  const [transformError, setTransformError] = useState<string | null>(null);
+  const [history, setHistory] = useState<TransformLogEntry[]>([]);
 
   // Reset local state if upstream card changes
   useEffect(() => {
     setLabel(card.label ?? "");
-    setNotes(card.notes ?? "");
     setFuelPct(card.fuel_surcharge_percent !== null ? String(card.fuel_surcharge_percent) : "");
-  }, [card.id, card.label, card.notes, card.fuel_surcharge_percent]);
+  }, [card.id, card.label, card.fuel_surcharge_percent]);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -71,10 +82,6 @@ export default function RateCardCard({ card, onChanged }: RateCardCardProps) {
     [card.id]
   );
 
-  const handleNotesChange = (v: string) => {
-    setNotes(v);
-    queueSave({ notes: v });
-  };
   const handleLabelChange = (v: string) => {
     setLabel(v);
     queueSave({ label: v });
@@ -98,6 +105,41 @@ export default function RateCardCard({ card, onChanged }: RateCardCardProps) {
       onChanged();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Status change failed");
+    }
+  };
+
+  const runTransform = async () => {
+    const trimmed = instruction.trim();
+    if (!trimmed || running) return;
+    setRunning(true);
+    setTransformError(null);
+    try {
+      const res = await fetch(`/api/rate-cards/${card.id}/transform`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction: trimmed }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.error || `Transform failed (${res.status})`);
+      }
+      setHistory((prev) => [
+        {
+          at: new Date().toISOString(),
+          instruction: trimmed,
+          summary: typeof json.summary === "string" ? json.summary : "",
+          warnings: Array.isArray(json.warnings) ? json.warnings : [],
+          lines_before: typeof json.lines_before === "number" ? json.lines_before : 0,
+          lines_applied: typeof json.lines_applied === "number" ? json.lines_applied : 0,
+        },
+        ...prev,
+      ]);
+      setInstruction("");
+      onChanged();
+    } catch (e: unknown) {
+      setTransformError(e instanceof Error ? e.message : "Transform failed");
+    } finally {
+      setRunning(false);
     }
   };
 
@@ -209,15 +251,70 @@ export default function RateCardCard({ card, onChanged }: RateCardCardProps) {
         </Field>
       </div>
 
-      <Field label="Notes / comments — adjust freely">
-        <textarea
-          value={notes}
-          onChange={(e) => handleNotesChange(e.target.value)}
-          rows={2}
-          placeholder="Anything to flag — pricing assumptions, exceptions, what's negotiated, who supplied this card…"
-          className="input-field text-sm resize-y"
-        />
-      </Field>
+      <div className="space-y-2">
+        <Field label="Instruction — Claude rewrites the rate lines">
+          <textarea
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            rows={2}
+            disabled={running}
+            placeholder='e.g. "make rates exclusive of GST", "round all rates to nearest 5 cents", "add 8% to Metro NSW only"'
+            className="input-field text-sm resize-y disabled:opacity-60"
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                void runTransform();
+              }
+            }}
+          />
+        </Field>
+        <div className="flex justify-between items-center gap-3 flex-wrap">
+          <p className="text-xs text-tac-muted">
+            Runs across all {card.lines.length} lines. ⌘/Ctrl + Enter to apply. Review the
+            table below — every change is editable.
+          </p>
+          <button
+            type="button"
+            onClick={runTransform}
+            disabled={!instruction.trim() || running}
+            className="bg-tac-accent text-tac-bg font-semibold px-4 py-1.5 rounded text-sm hover:bg-tac-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {running ? "Applying…" : "Apply instruction"}
+          </button>
+        </div>
+        {transformError && (
+          <div className="rounded border border-tac-danger/40 bg-tac-danger/10 px-3 py-2 text-sm text-tac-danger">
+            {transformError}
+          </div>
+        )}
+        {history.length > 0 && (
+          <div className="border border-tac-border rounded p-3 space-y-2 bg-tac-bg-light/40">
+            <p className="text-xs uppercase tracking-wide text-tac-muted">Recent runs</p>
+            {history.slice(0, 3).map((entry, i) => (
+              <div key={`${entry.at}-${i}`} className="text-xs space-y-1">
+                <p className="text-tac-text">
+                  <span className="text-tac-success">✓</span>{" "}
+                  <span className="italic">&ldquo;{entry.instruction}&rdquo;</span>
+                  {entry.lines_applied > 0 && (
+                    <span className="text-tac-muted">
+                      {" "}
+                      · {entry.lines_applied}/{entry.lines_before} lines
+                    </span>
+                  )}
+                </p>
+                {entry.summary && <p className="text-tac-muted pl-4">{entry.summary}</p>}
+                {entry.warnings.length > 0 && (
+                  <ul className="list-disc pl-8 text-tac-warning">
+                    {entry.warnings.map((w, j) => (
+                      <li key={j}>{w}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {error && (
         <div className="rounded border border-tac-danger/40 bg-tac-danger/10 px-3 py-2 text-sm text-tac-danger">

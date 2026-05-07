@@ -251,3 +251,66 @@ export async function deleteRateCardLine(id: string): Promise<void> {
   if (error) throw new Error(`deleteRateCardLine: ${error.message}`);
   revalidatePath("/final-mile");
 }
+
+export async function replaceRateCardLines(
+  rateCardId: string,
+  lines: RateCardLineInput[]
+): Promise<FreightRateCardLine[]> {
+  if (lines.length === 0) {
+    throw new Error("replaceRateCardLines: refusing to clear all lines");
+  }
+
+  const supabase = getSupabaseAdmin();
+
+  const { data: existing, error: existingErr } = await supabase
+    .from("freight_rate_card_lines")
+    .select("*")
+    .eq("rate_card_id", rateCardId);
+  if (existingErr) throw new Error(`replaceRateCardLines (read): ${existingErr.message}`);
+
+  const { error: deleteErr } = await supabase
+    .from("freight_rate_card_lines")
+    .delete()
+    .eq("rate_card_id", rateCardId);
+  if (deleteErr) throw new Error(`replaceRateCardLines (delete): ${deleteErr.message}`);
+
+  const payload = lines.map((l) => ({
+    rate_card_id: rateCardId,
+    zone_label: l.zone_label.trim(),
+    zone_description: l.zone_description?.trim() || null,
+    weight_min_kg: l.weight_min_kg ?? null,
+    weight_max_kg: l.weight_max_kg ?? null,
+    rate_basis: l.rate_basis,
+    rate_aud: l.rate_aud,
+    per_kg_rate_aud: l.per_kg_rate_aud ?? null,
+    minimum_charge_aud: l.minimum_charge_aud ?? null,
+    notes: l.notes?.trim() || null,
+  }));
+
+  const { data: inserted, error: insertErr } = await supabase
+    .from("freight_rate_card_lines")
+    .insert(payload)
+    .select();
+
+  if (insertErr) {
+    if (existing && existing.length > 0) {
+      const restorePayload = (existing as FreightRateCardLine[]).map((l) => ({
+        rate_card_id: l.rate_card_id,
+        zone_label: l.zone_label,
+        zone_description: l.zone_description,
+        weight_min_kg: l.weight_min_kg,
+        weight_max_kg: l.weight_max_kg,
+        rate_basis: l.rate_basis,
+        rate_aud: l.rate_aud,
+        per_kg_rate_aud: l.per_kg_rate_aud,
+        minimum_charge_aud: l.minimum_charge_aud,
+        notes: l.notes,
+      }));
+      await supabase.from("freight_rate_card_lines").insert(restorePayload);
+    }
+    throw new Error(`replaceRateCardLines (insert): ${insertErr.message}`);
+  }
+
+  revalidatePath("/final-mile");
+  return (inserted ?? []) as FreightRateCardLine[];
+}
