@@ -7,6 +7,7 @@ import type {
   FreightShipmentVolumeWithCarrier,
 } from "@/lib/db/types";
 import type { ShipmentVolumeInput } from "@/lib/actions/shipment-volumes";
+import { SERVICE_LEVEL_OPTIONS } from "@/lib/constants/service-levels";
 
 interface Props {
   tenantId: string | null;
@@ -325,12 +326,32 @@ export default function BillingTab({ tenantId }: Props) {
                       </select>
                     </td>
                     <td className="py-1.5 px-2">
-                      <input
-                        type="text"
-                        value={d.service_level}
-                        onChange={(e) => updateDraft(i, { service_level: e.target.value })}
+                      <select
+                        value={
+                          (SERVICE_LEVEL_OPTIONS as readonly string[]).includes(d.service_level)
+                            ? d.service_level
+                            : d.service_level
+                              ? "__custom__"
+                              : ""
+                        }
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "__custom__") return;
+                          updateDraft(i, { service_level: v });
+                        }}
                         className="input-field text-sm py-1 w-full"
-                      />
+                      >
+                        <option value="">Select…</option>
+                        {SERVICE_LEVEL_OPTIONS.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                        {d.service_level &&
+                          !(SERVICE_LEVEL_OPTIONS as readonly string[]).includes(d.service_level) && (
+                            <option value="__custom__">{d.service_level} (csv)</option>
+                          )}
+                      </select>
                     </td>
                     <td className="py-1.5 px-2">
                       <input

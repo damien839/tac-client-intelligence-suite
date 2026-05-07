@@ -7,6 +7,7 @@ import type {
   CreateRateCardInput,
   RateCardLineInput,
 } from "@/lib/actions/rate-cards";
+import { SERVICE_LEVEL_OPTIONS } from "@/lib/constants/service-levels";
 
 interface RateCardUploaderProps {
   tenantId: string;
@@ -359,13 +360,18 @@ export default function RateCardUploader({
           </select>
         </Field>
         <Field label="Service level *">
-          <input
-            type="text"
+          <select
             value={serviceLevel}
             onChange={(e) => setServiceLevel(e.target.value)}
-            placeholder="e.g. Standard, Express, Same Day"
             className="input-field"
-          />
+          >
+            <option value="">Select service level…</option>
+            {SERVICE_LEVEL_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
         </Field>
         <Field label="Label">
           <input
