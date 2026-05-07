@@ -1,0 +1,289 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TAC Final Mile Analyzer Report",
+  "description": "Report payload produced by the analyzer in Execute Analysis mode. Renders to the client-facing report page.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "report_state",
+    "header",
+    "headline_savings",
+    "spend_comparison",
+    "region_breakdown",
+    "cube_analysis",
+    "top_opportunities",
+    "recommendations",
+    "warnings",
+    "methodology"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version this payload was generated against.",
+      "const": "0.1.0"
+    },
+    "report_state": {
+      "type": "string",
+      "enum": ["final", "draft_only"],
+      "description": "draft_only when any block-severity warning fires."
+    },
+    "header": {
+      "type": "object",
+      "required": [
+        "tenant_name",
+        "tenant_kind",
+        "currency",
+        "period_label",
+        "total_monthly_shipments",
+        "current_monthly_spend",
+        "confidence_score",
+        "confidence_note"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tenant_name": { "type": "string" },
+        "tenant_kind": { "type": "string", "enum": ["client", "prospect"] },
+        "currency": { "type": "string" },
+        "period_label": { "type": "string" },
+        "total_monthly_shipments": { "type": "number" },
+        "current_monthly_spend": { "type": "number" },
+        "confidence_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "confidence_note": { "type": "string" }
+      }
+    },
+    "headline_savings": {
+      "type": "object",
+      "required": [
+        "annual_savings_aud",
+        "monthly_savings_aud",
+        "savings_pct",
+        "current_annual_spend",
+        "projected_annual_spend",
+        "framing"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "annual_savings_aud": { "type": "number" },
+        "monthly_savings_aud": { "type": "number" },
+        "savings_pct": { "type": "number" },
+        "current_annual_spend": { "type": "number" },
+        "projected_annual_spend": { "type": "number" },
+        "framing": {
+          "type": "string",
+          "description": "One-sentence decision-framed summary of the headline number."
+        }
+      }
+    },
+    "spend_comparison": {
+      "type": "object",
+      "required": ["chart_data", "table"],
+      "additionalProperties": false,
+      "properties": {
+        "chart_data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "current_monthly_spend", "projected_monthly_spend"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string" },
+              "current_monthly_spend": { "type": "number" },
+              "projected_monthly_spend": { "type": "number" }
+            }
+          }
+        },
+        "table": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "carrier",
+              "service_level",
+              "monthly_shipments",
+              "current_cpo",
+              "projected_cpo",
+              "cpo_delta_aud",
+              "cpo_delta_pct",
+              "monthly_savings",
+              "annual_savings"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "carrier": { "type": "string" },
+              "service_level": { "type": "string" },
+              "monthly_shipments": { "type": "number" },
+              "current_cpo": { "type": "number" },
+              "projected_cpo": { "type": "number" },
+              "cpo_delta_aud": { "type": "number" },
+              "cpo_delta_pct": { "type": "number" },
+              "monthly_savings": { "type": "number" },
+              "annual_savings": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "region_breakdown": {
+      "type": "object",
+      "required": ["chart_data", "table", "unmapped_pct"],
+      "additionalProperties": false,
+      "properties": {
+        "chart_data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["region", "current_monthly_spend", "projected_monthly_spend"],
+            "additionalProperties": false,
+            "properties": {
+              "region": { "type": "string" },
+              "current_monthly_spend": { "type": "number" },
+              "projected_monthly_spend": { "type": "number" }
+            }
+          }
+        },
+        "table": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "region",
+              "share_pct",
+              "monthly_shipments",
+              "current_monthly_spend",
+              "projected_monthly_spend",
+              "savings_aud",
+              "savings_pct"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "region": { "type": "string" },
+              "share_pct": { "type": "number" },
+              "monthly_shipments": { "type": "number" },
+              "current_monthly_spend": { "type": "number" },
+              "projected_monthly_spend": { "type": "number" },
+              "savings_aud": { "type": "number" },
+              "savings_pct": { "type": "number" }
+            }
+          }
+        },
+        "unmapped_pct": {
+          "type": "number",
+          "description": "% of monthly shipments that couldn't be classified to a state."
+        }
+      }
+    },
+    "cube_analysis": {
+      "type": "object",
+      "required": [
+        "total_monthly_cube_m3",
+        "total_annual_cube_m3",
+        "cost_per_m3_current",
+        "cost_per_m3_projected",
+        "density_assumption_kg_per_m3",
+        "estimation_note",
+        "dim_risk_lanes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "total_monthly_cube_m3": { "type": "number" },
+        "total_annual_cube_m3": { "type": "number" },
+        "cost_per_m3_current": { "type": "number" },
+        "cost_per_m3_projected": { "type": "number" },
+        "density_assumption_kg_per_m3": { "type": "number" },
+        "estimation_note": {
+          "type": "string",
+          "description": "Plain-English note about how cube was derived (estimated vs measured)."
+        },
+        "dim_risk_lanes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["lane", "avg_weight_kg", "estimated_dim_weight_kg", "note"],
+            "additionalProperties": false,
+            "properties": {
+              "lane": { "type": "string" },
+              "avg_weight_kg": { "type": "number" },
+              "estimated_dim_weight_kg": { "type": "number" },
+              "note": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "top_opportunities": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": [
+          "rank",
+          "lane",
+          "annual_savings_aud",
+          "per_parcel_delta_aud",
+          "monthly_volume",
+          "consultant_note"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "rank": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "lane": { "type": "string" },
+          "annual_savings_aud": { "type": "number" },
+          "per_parcel_delta_aud": { "type": "number" },
+          "monthly_volume": { "type": "number" },
+          "consultant_note": { "type": "string" }
+        }
+      }
+    },
+    "recommendations": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 7,
+      "items": {
+        "type": "object",
+        "required": ["title", "rationale"],
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string" },
+          "rationale": { "type": "string" },
+          "estimated_impact_aud_per_year": { "type": ["number", "null"] }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "severity", "title", "body"],
+        "additionalProperties": false,
+        "properties": {
+          "code": { "type": "string" },
+          "severity": { "type": "string", "enum": ["info", "warn", "block"] },
+          "title": { "type": "string" },
+          "body": { "type": "string" },
+          "linked_section": {
+            "type": ["string", "null"],
+            "description": "Optional schema key of the section this warning relates to."
+          }
+        }
+      }
+    },
+    "methodology": {
+      "type": "object",
+      "required": [
+        "density_assumption_kg_per_m3",
+        "surcharge_treatment",
+        "unmatched_treatment",
+        "confidence_formula_plain_english"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "density_assumption_kg_per_m3": { "type": "number" },
+        "surcharge_treatment": { "type": "string" },
+        "unmatched_treatment": { "type": "string" },
+        "confidence_formula_plain_english": { "type": "string" }
+      }
+    }
+  }
+}
