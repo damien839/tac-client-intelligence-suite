@@ -36,7 +36,17 @@ export default function FinalMilePage() {
     <>
       <Nav />
       <main className="max-w-7xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-2">Final Mile</h1>
+        <div className="flex items-start justify-between gap-4 mb-2 flex-wrap">
+          <h1 className="text-3xl font-bold">Final Mile</h1>
+          {activeTenant && (
+            <a
+              href="/final-mile/analyzer"
+              className="bg-tac-accent text-tac-bg font-semibold px-4 py-2 rounded hover:bg-tac-accent-hover text-sm"
+            >
+              Open Analyzer →
+            </a>
+          )}
+        </div>
         <p className="text-tac-muted mb-8">
           Carrier rate-card ingestion, comparison, and savings analysis. Powered by Claude for clean
           import from PDF, Excel, or CSV.

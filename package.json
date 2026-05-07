@@ -13,11 +13,13 @@
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.3",
     "@types/papaparse": "^5.5.2",
+    "ajv": "^8.20.0",
     "next": "14.2.35",
     "papaparse": "^5.5.3",
     "react": "^18",
     "react-dom": "^18",
     "recharts": "^3.8.1",
+    "server-only": "^0.0.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
