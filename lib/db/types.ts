@@ -133,3 +133,22 @@ export interface PostcodeZone {
   imported_at: string;
   updated_at: string;
 }
+
+export interface CarrierCoverage {
+  carrier_code: string;
+  service_code: string;
+  postcode: string;
+  is_covered: boolean;
+  rate_count: number | null;
+  min_cost_aud: number | null;
+  max_cost_aud: number | null;
+  source: string;
+  imported_at: string;
+  updated_at: string;
+}
+
+export interface PostcodeCoverageBundle {
+  postcode: string;
+  zone: PostcodeZone | null;
+  carriers: CarrierCoverage[];
+}
