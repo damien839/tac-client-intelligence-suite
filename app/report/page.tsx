@@ -27,14 +27,21 @@ interface SimulatorResults {
   avgProfitPerOrder: number;
 }
 
-interface AuditResults {
+interface WarehouseResults {
   timestamp: string;
   clientName: string;
-  totalSavingsOpportunity: number;
-  carrierSavings: number;
   warehouseSavings: number;
   topBenchmarkGaps: string[];
   monthlyOrders: number;
+}
+
+interface FinalMileResults {
+  timestamp: string;
+  clientName: string;
+  carrierSavings: number;
+  topCarrierGaps: string[];
+  monthlyShipments: number;
+  avgWeight: number;
 }
 
 interface RetentionResults {
@@ -89,9 +96,13 @@ function UpdatedBadge({ timestamp }: { timestamp: string }) {
 export default function ReportPage() {
   const [profile, setProfile] = useState<ClientProfile | null>(null);
   const [simulator, setSimulator] = useState<SimulatorResults | null>(null);
-  const [audit, setAudit] = useState<AuditResults | null>(null);
+  const [warehouse, setWarehouse] = useState<WarehouseResults | null>(null);
+  const [finalMile, setFinalMile] = useState<FinalMileResults | null>(null);
   const [retention, setRetention] = useState<RetentionResults | null>(null);
   const [, setTick] = useState(0);
+
+  const totalSavings =
+    (warehouse?.warehouseSavings || 0) + (finalMile?.carrierSavings || 0);
 
   useEffect(() => {
     const loadData = () => {
@@ -101,8 +112,11 @@ export default function ReportPage() {
       const s = localStorage.getItem("tac_simulator_results");
       if (s) setSimulator(JSON.parse(s));
 
-      const a = localStorage.getItem("tac_audit_results");
-      if (a) setAudit(JSON.parse(a));
+      const w = localStorage.getItem("tac_warehouse_results");
+      if (w) setWarehouse(JSON.parse(w));
+
+      const f = localStorage.getItem("tac_final_mile_results");
+      if (f) setFinalMile(JSON.parse(f));
 
       const r = localStorage.getItem("tac_retention_results");
       if (r) setRetention(JSON.parse(r));
@@ -167,22 +181,23 @@ export default function ReportPage() {
           <p className="text-tac-muted leading-relaxed">
             This report presents findings from The Aggregate Co.&apos;s analysis of{" "}
             {profile?.clientName || "the client"}&apos;s ecommerce operations.
-            Three areas were evaluated: shipping threshold strategy, carrier and
-            warehouse cost benchmarking, and customer retention impact on EBIT.
+            Four areas were evaluated: shipping threshold strategy, warehouse cost
+            benchmarking, final mile carrier benchmarking, and customer retention
+            impact on EBIT.
           </p>
-          {(simulator || audit || retention) && (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+          {(simulator || warehouse || finalMile || retention) && (
+            <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
               {simulator && (
                 <div className="bg-tac-bg-light rounded-lg p-3 text-center">
                   <p className="text-xs text-tac-muted">Optimal Threshold</p>
                   <p className="text-xl font-bold text-tac-accent">${simulator.optimalThreshold}</p>
                 </div>
               )}
-              {audit && (
+              {(warehouse || finalMile) && (
                 <div className="bg-tac-bg-light rounded-lg p-3 text-center">
                   <p className="text-xs text-tac-muted">Total Savings Opportunity</p>
                   <p className="text-xl font-bold text-tac-accent">
-                    {formatCurrency(audit.totalSavingsOpportunity, 0)}
+                    {formatCurrency(totalSavings, 0)}
                   </p>
                 </div>
               )}
@@ -191,6 +206,14 @@ export default function ReportPage() {
                   <p className="text-xs text-tac-muted">Annual EBIT Uplift</p>
                   <p className="text-xl font-bold text-tac-accent">
                     {formatCurrency(retention.annualEbitUplift, 0)}
+                  </p>
+                </div>
+              )}
+              {(warehouse || finalMile) && (
+                <div className="bg-tac-bg-light rounded-lg p-3 text-center">
+                  <p className="text-xs text-tac-muted">Modules Run</p>
+                  <p className="text-xl font-bold text-tac-accent">
+                    {[simulator, warehouse, finalMile, retention].filter(Boolean).length}/4
                   </p>
                 </div>
               )}
@@ -248,48 +271,42 @@ export default function ReportPage() {
           )}
         </section>
 
-        {/* Module 2: Cost Audit */}
+        {/* Module 2: Warehouse Cost Audit */}
         <section className="card mb-8 print-break">
           <h2 className="text-2xl font-semibold text-tac-accent mb-4">
-            Module 2: Cost Audit & Benchmarking
-            {audit && <UpdatedBadge timestamp={audit.timestamp} />}
+            Module 2: Warehouse Cost Audit
+            {warehouse && <UpdatedBadge timestamp={warehouse.timestamp} />}
           </h2>
 
-          {audit ? (
+          {warehouse ? (
             <>
               <p className="text-tac-muted leading-relaxed mb-4">
-                Benchmarking of carrier rates and warehouse operations against TAC industry standards.
+                Benchmarking of warehouse efficiency and cost-per-order against TAC standards.
               </p>
 
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
                 <div className="bg-tac-bg-light rounded-lg p-3">
-                  <p className="text-xs text-tac-muted">Total Savings Opportunity</p>
+                  <p className="text-xs text-tac-muted">Annual Savings Opportunity</p>
                   <p className="text-2xl font-bold text-tac-accent">
-                    {formatCurrency(audit.totalSavingsOpportunity, 0)}
+                    {formatCurrency(warehouse.warehouseSavings, 0)}
                   </p>
                   <p className="text-xs text-tac-muted mt-1">per year</p>
                 </div>
                 <div className="bg-tac-bg-light rounded-lg p-3">
-                  <p className="text-xs text-tac-muted">Carrier Savings</p>
+                  <p className="text-xs text-tac-muted">Monthly Order Volume</p>
                   <p className="text-xl font-bold">
-                    {formatCurrency(audit.carrierSavings, 0)}
-                  </p>
-                </div>
-                <div className="bg-tac-bg-light rounded-lg p-3">
-                  <p className="text-xs text-tac-muted">Warehouse Savings</p>
-                  <p className="text-xl font-bold">
-                    {formatCurrency(audit.warehouseSavings, 0)}
+                    {warehouse.monthlyOrders.toLocaleString()}
                   </p>
                 </div>
               </div>
 
-              {audit.topBenchmarkGaps.length > 0 && (
+              {warehouse.topBenchmarkGaps.length > 0 && (
                 <div className="mt-3">
                   <p className="text-sm font-medium text-tac-text mb-2">
                     Top Benchmark Gaps:
                   </p>
                   <ul className="list-disc pl-5 space-y-1 text-sm text-tac-muted">
-                    {audit.topBenchmarkGaps.map((gap, i) => (
+                    {warehouse.topBenchmarkGaps.map((gap, i) => (
                       <li key={i}>{gap}</li>
                     ))}
                   </ul>
@@ -297,14 +314,68 @@ export default function ReportPage() {
               )}
             </>
           ) : (
-            <PlaceholderCard title="Cost Audit" href="/audit" icon="📊" />
+            <PlaceholderCard title="Warehouse Cost Audit" href="/warehouse" icon="🏭" />
           )}
         </section>
 
-        {/* Module 3: Retention */}
+        {/* Module 3: Final Mile */}
         <section className="card mb-8 print-break">
           <h2 className="text-2xl font-semibold text-tac-accent mb-4">
-            Module 3: EBIT & Retention Impact
+            Module 3: Final Mile Audit
+            {finalMile && <UpdatedBadge timestamp={finalMile.timestamp} />}
+          </h2>
+
+          {finalMile ? (
+            <>
+              <p className="text-tac-muted leading-relaxed mb-4">
+                Benchmarking of carrier rates against TAC standards. Surface lane-level
+                opportunities to reduce final mile cost.
+              </p>
+
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                <div className="bg-tac-bg-light rounded-lg p-3">
+                  <p className="text-xs text-tac-muted">Annual Savings Opportunity</p>
+                  <p className="text-2xl font-bold text-tac-accent">
+                    {formatCurrency(finalMile.carrierSavings, 0)}
+                  </p>
+                  <p className="text-xs text-tac-muted mt-1">per year</p>
+                </div>
+                <div className="bg-tac-bg-light rounded-lg p-3">
+                  <p className="text-xs text-tac-muted">Monthly Shipments</p>
+                  <p className="text-xl font-bold">
+                    {finalMile.monthlyShipments.toLocaleString()}
+                  </p>
+                </div>
+                <div className="bg-tac-bg-light rounded-lg p-3">
+                  <p className="text-xs text-tac-muted">Avg Weight</p>
+                  <p className="text-xl font-bold">
+                    {finalMile.avgWeight} kg
+                  </p>
+                </div>
+              </div>
+
+              {finalMile.topCarrierGaps.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-sm font-medium text-tac-text mb-2">
+                    Top Carrier Rate Gaps:
+                  </p>
+                  <ul className="list-disc pl-5 space-y-1 text-sm text-tac-muted">
+                    {finalMile.topCarrierGaps.map((gap, i) => (
+                      <li key={i}>{gap}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          ) : (
+            <PlaceholderCard title="Final Mile Audit" href="/final-mile" icon="🚚" />
+          )}
+        </section>
+
+        {/* Module 4: Retention */}
+        <section className="card mb-8 print-break">
+          <h2 className="text-2xl font-semibold text-tac-accent mb-4">
+            Module 4: EBIT & Retention Impact
             {retention && <UpdatedBadge timestamp={retention.timestamp} />}
           </h2>
 

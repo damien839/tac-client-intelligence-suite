@@ -44,12 +44,20 @@ export default function HomePage() {
       id: "simulator",
     },
     {
-      href: "/audit",
-      title: "Cost Audit & Comparison",
+      href: "/warehouse",
+      title: "Warehouse Cost Audit",
       description:
-        "Benchmark carrier and warehouse costs against TAC standards. Surface savings opportunities.",
-      icon: "📊",
-      id: "audit",
+        "Benchmark warehouse efficiency and cost-per-order against TAC standards.",
+      icon: "🏭",
+      id: "warehouse",
+    },
+    {
+      href: "/final-mile",
+      title: "Final Mile Audit",
+      description:
+        "Benchmark carrier rates against TAC standards. Surface lane-level savings.",
+      icon: "🚚",
+      id: "final-mile",
     },
     {
       href: "/retention",
@@ -129,7 +137,7 @@ export default function HomePage() {
         </div>
 
         {/* Module Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {modules.map((mod) => (
             <Link key={mod.href} href={mod.href}>
               <div className="card hover:border-tac-accent/50 transition-all cursor-pointer h-full group">
