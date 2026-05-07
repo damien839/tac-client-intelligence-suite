@@ -53,6 +53,9 @@ export default function RateCardUploader({
   const [notes, setNotes] = useState("");
   const [drafts, setDrafts] = useState<DraftLine[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [parseWarnings, setParseWarnings] = useState<string[]>([]);
+  const [parsing, setParsing] = useState<null | "csv" | "excel" | "ai">(null);
+  const [lastFileName, setLastFileName] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -66,31 +69,140 @@ export default function RateCardUploader({
     setNotes("");
     setDrafts([]);
     setParseError(null);
+    setParseWarnings([]);
+    setParsing(null);
+    setLastFileName(null);
     setSubmitError(null);
   }, []);
 
-  const handleFile = useCallback((file: File) => {
-    setParseError(null);
-    Papa.parse<Record<string, string>>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        if (results.errors.length > 0) {
-          setParseError(results.errors[0].message);
+  const ingestRows = useCallback(
+    (rows: DraftLine[], fileName: string, warnings: string[] = []) => {
+      if (rows.length === 0) {
+        setParseError(
+          `No rate lines found in ${fileName}. Try a different file or add rows manually.`
+        );
+        setParseWarnings(warnings);
+        return;
+      }
+      setDrafts(rows);
+      setParseWarnings(warnings);
+      setLastFileName(fileName);
+    },
+    []
+  );
+
+  const handleCsv = useCallback(
+    (file: File) => {
+      setParsing("csv");
+      Papa.parse<Record<string, string>>(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          setParsing(null);
+          if (results.errors.length > 0) {
+            setParseError(results.errors[0].message);
+            return;
+          }
+          const rows: DraftLine[] = (results.data ?? [])
+            .map((row, idx) => mapCsvRow(row, idx))
+            .filter((r): r is DraftLine => r !== null);
+          ingestRows(rows, file.name);
+        },
+        error: (err) => {
+          setParsing(null);
+          setParseError(err.message);
+        },
+      });
+    },
+    [ingestRows]
+  );
+
+  const handleExcel = useCallback(
+    async (file: File) => {
+      setParsing("excel");
+      try {
+        const XLSX = await import("xlsx");
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const sheetName = wb.SheetNames[0];
+        if (!sheetName) {
+          setParseError("No sheets found in workbook");
           return;
         }
-        const rows: DraftLine[] = (results.data ?? [])
+        const sheet = wb.Sheets[sheetName];
+        const rowsRaw: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, {
+          defval: "",
+          raw: false,
+        });
+        const stringified: Record<string, string>[] = rowsRaw.map((r) => {
+          const out: Record<string, string> = {};
+          for (const [k, v] of Object.entries(r)) {
+            out[k] = v == null ? "" : String(v);
+          }
+          return out;
+        });
+        const rows: DraftLine[] = stringified
           .map((row, idx) => mapCsvRow(row, idx))
           .filter((r): r is DraftLine => r !== null);
-        if (rows.length === 0) {
-          setParseError("No valid rows found in CSV");
-          return;
+        ingestRows(rows, `${file.name} → ${sheetName}`);
+      } catch (e: unknown) {
+        setParseError(
+          e instanceof Error ? `Excel parse failed: ${e.message}` : "Excel parse failed"
+        );
+      } finally {
+        setParsing(null);
+      }
+    },
+    [ingestRows]
+  );
+
+  const handleAiExtract = useCallback(
+    async (file: File) => {
+      setParsing("ai");
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/rate-cards/extract", {
+          method: "POST",
+          body: fd,
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(json.error || `Extract failed (${res.status})`);
         }
-        setDrafts(rows);
-      },
-      error: (err) => setParseError(err.message),
-    });
-  }, []);
+        const lines = Array.isArray(json.lines) ? (json.lines as RateCardLineInput[]) : [];
+        const warnings = Array.isArray(json.warnings) ? (json.warnings as string[]) : [];
+        const rows: DraftLine[] = lines.map((l, idx) => ({
+          ...l,
+          __id: `ai-${idx}-${crypto.randomUUID()}`,
+        }));
+        ingestRows(rows, file.name, warnings);
+      } catch (e: unknown) {
+        setParseError(
+          e instanceof Error ? e.message : "Extraction failed — try a clearer file."
+        );
+      } finally {
+        setParsing(null);
+      }
+    },
+    [ingestRows]
+  );
+
+  const handleFile = useCallback(
+    (file: File) => {
+      setParseError(null);
+      setParseWarnings([]);
+      const kind = detectFileKind(file);
+      if (kind === "csv") void handleCsv(file);
+      else if (kind === "excel") void handleExcel(file);
+      else if (kind === "ai") void handleAiExtract(file);
+      else
+        setParseError(
+          `Unsupported file type "${file.name}". Use CSV, Excel, PDF, or image (PNG/JPG/WEBP).`
+        );
+    },
+    [handleCsv, handleExcel, handleAiExtract]
+  );
 
   const updateDraft = useCallback(
     (id: string, patch: Partial<DraftLine>) => {
@@ -307,7 +419,8 @@ export default function RateCardUploader({
           <div>
             <h4 className="font-semibold text-sm">Rate lines</h4>
             <p className="text-xs text-tac-muted mt-0.5">
-              Upload a CSV or add rows manually. Edit any field before saving.
+              CSV/Excel parsed locally. PDF or image runs through Claude — review the rows
+              before saving.
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -318,12 +431,23 @@ export default function RateCardUploader({
             >
               download CSV template
             </button>
-            <label className="text-sm border border-tac-border px-3 py-1.5 rounded hover:border-tac-accent cursor-pointer">
-              Upload CSV
+            <label
+              className={`text-sm border border-tac-border px-3 py-1.5 rounded hover:border-tac-accent cursor-pointer ${
+                parsing ? "opacity-60 pointer-events-none" : ""
+              }`}
+            >
+              {parsing === "ai"
+                ? "Extracting…"
+                : parsing === "excel"
+                ? "Reading Excel…"
+                : parsing === "csv"
+                ? "Reading CSV…"
+                : "Upload file"}
               <input
                 type="file"
-                accept=".csv"
+                accept=".csv,.xlsx,.xls,.pdf,.png,.jpg,.jpeg,.webp,.gif"
                 className="hidden"
+                disabled={!!parsing}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) handleFile(file);
@@ -347,9 +471,22 @@ export default function RateCardUploader({
           </div>
         )}
 
+        {parseWarnings.length > 0 && (
+          <div className="rounded border border-tac-warning/40 bg-tac-warning/10 px-3 py-2 text-sm text-tac-warning space-y-1">
+            <p className="font-medium">
+              Heads up{lastFileName ? ` (${lastFileName})` : ""}:
+            </p>
+            <ul className="list-disc pl-5 text-xs">
+              {parseWarnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {drafts.length === 0 ? (
           <div className="text-sm text-tac-muted italic border border-dashed border-tac-border rounded px-3 py-4">
-            No rate lines yet. Upload a CSV or add rows manually.
+            No rate lines yet. Upload a CSV, Excel, PDF, or image — or add rows manually.
           </div>
         ) : (
           <DraftLinesTable
@@ -547,6 +684,26 @@ function TdInput({
       />
     </td>
   );
+}
+
+function detectFileKind(file: File): "csv" | "excel" | "ai" | null {
+  const name = file.name.toLowerCase();
+  const mime = file.type.toLowerCase();
+  if (mime === "text/csv" || name.endsWith(".csv")) return "csv";
+  if (
+    mime.includes("spreadsheetml") ||
+    mime === "application/vnd.ms-excel" ||
+    name.endsWith(".xlsx") ||
+    name.endsWith(".xls")
+  )
+    return "excel";
+  if (
+    mime === "application/pdf" ||
+    mime.startsWith("image/") ||
+    /\.(pdf|png|jpe?g|webp|gif)$/.test(name)
+  )
+    return "ai";
+  return null;
 }
 
 function mapCsvRow(row: Record<string, string>, idx: number): DraftLine | null {
