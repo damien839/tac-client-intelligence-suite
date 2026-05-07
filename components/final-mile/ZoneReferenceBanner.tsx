@@ -18,6 +18,11 @@ interface CoverageStats {
   }>;
   source: string | null;
   last_imported_at: string | null;
+  missing_for_tenant: Array<{
+    carrier_id: string;
+    carrier_code: string;
+    carrier_name: string;
+  }>;
 }
 
 const SERVICE_LABEL: Record<string, string> = {
@@ -42,19 +47,28 @@ const CARRIER_LABEL: Record<string, string> = {
   DHL_ECOM: "DHL eCom",
 };
 
-export default function ZoneReferenceBanner() {
+interface ZoneReferenceBannerProps {
+  tenantId?: string | null;
+}
+
+export default function ZoneReferenceBanner({
+  tenantId,
+}: ZoneReferenceBannerProps = {}) {
   const [stats, setStats] = useState<ZoneStats | null>(null);
   const [coverage, setCoverage] = useState<CoverageStats | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    const coverageUrl = tenantId
+      ? `/api/carrier-coverage?stats=1&tenant_id=${encodeURIComponent(tenantId)}`
+      : "/api/carrier-coverage?stats=1";
     Promise.all([
       fetch("/api/postcode-zones?stats=1", { cache: "no-store" }).then((r) => {
         if (!r.ok) throw new Error(`zones HTTP ${r.status}`);
         return r.json() as Promise<ZoneStats>;
       }),
-      fetch("/api/carrier-coverage?stats=1", { cache: "no-store" }).then((r) => {
+      fetch(coverageUrl, { cache: "no-store" }).then((r) => {
         if (!r.ok) throw new Error(`coverage HTTP ${r.status}`);
         return r.json() as Promise<CoverageStats>;
       }),
@@ -71,7 +85,7 @@ export default function ZoneReferenceBanner() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [tenantId]);
 
   if (error) return null;
   if (!stats) return null;
@@ -114,6 +128,19 @@ export default function ZoneReferenceBanner() {
               · synced {coverageImportedAt}
             </>
           )}
+        </div>
+      )}
+      {coverage && coverage.missing_for_tenant.length > 0 && (
+        <div className="text-tac-warning">
+          <span className="font-medium">No coverage data yet for:</span>{" "}
+          {coverage.missing_for_tenant
+            .map((c) => c.carrier_name)
+            .join(", ")}
+          <span className="text-tac-muted">
+            {" "}
+            — rate cards uploaded but ECX hasn&apos;t mirrored postcode coverage
+            yet.
+          </span>
         </div>
       )}
     </div>

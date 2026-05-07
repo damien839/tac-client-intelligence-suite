@@ -52,9 +52,16 @@ export interface CoverageStats {
   }>;
   source: string | null;
   last_imported_at: string | null;
+  missing_for_tenant: Array<{
+    carrier_id: string;
+    carrier_code: string;
+    carrier_name: string;
+  }>;
 }
 
-export async function carrierCoverageStats(): Promise<CoverageStats> {
+export async function carrierCoverageStats(
+  tenantId?: string
+): Promise<CoverageStats> {
   const supabase = getSupabaseAdmin();
 
   const totalRes = supabase
@@ -99,12 +106,61 @@ export async function carrierCoverageStats(): Promise<CoverageStats> {
     })
   );
 
+  const coveredCarrierCodes = new Set(pairs.map((p) => p.carrier_code));
+  const missing = tenantId
+    ? await fetchMissingCoverageCarriersForTenant(
+        supabase,
+        tenantId,
+        coveredCarrierCodes
+      )
+    : [];
+
   return {
     total_rows: totalRow.count ?? 0,
     by_carrier: counts.sort((a, b) => b.postcode_count - a.postcode_count),
     source: sampleRow.data?.[0]?.source ?? null,
     last_imported_at: sampleRow.data?.[0]?.imported_at ?? null,
+    missing_for_tenant: missing,
   };
+}
+
+async function fetchMissingCoverageCarriersForTenant(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  tenantId: string,
+  coveredCarrierCodes: ReadonlySet<string>
+): Promise<CoverageStats["missing_for_tenant"]> {
+  const { data, error } = await supabase
+    .from("freight_rate_cards")
+    .select("carrier_id, carrier:carriers(id, name, code)")
+    .eq("tenant_id", tenantId);
+  if (error)
+    throw new Error(
+      `fetchMissingCoverageCarriersForTenant: ${error.message}`
+    );
+
+  type Row = {
+    carrier_id: string;
+    carrier:
+      | { id: string; name: string; code: string }
+      | { id: string; name: string; code: string }[]
+      | null;
+  };
+  const seen = new Set<string>();
+  const missing: CoverageStats["missing_for_tenant"] = [];
+  for (const row of (data ?? []) as Row[]) {
+    const carrier = Array.isArray(row.carrier) ? row.carrier[0] : row.carrier;
+    if (!carrier) continue;
+    if (coveredCarrierCodes.has(carrier.code)) continue;
+    if (seen.has(carrier.id)) continue;
+    seen.add(carrier.id);
+    missing.push({
+      carrier_id: carrier.id,
+      carrier_code: carrier.code,
+      carrier_name: carrier.name,
+    });
+  }
+  missing.sort((a, b) => a.carrier_name.localeCompare(b.carrier_name));
+  return missing;
 }
 
 async function fetchCoverageRowsForPostcode(

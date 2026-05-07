@@ -16,7 +16,10 @@ export async function GET(req: Request) {
     const service = url.searchParams.get("service");
 
     if (stats === "1") {
-      return NextResponse.json(await carrierCoverageStats());
+      const tenantId = url.searchParams.get("tenant_id");
+      return NextResponse.json(
+        await carrierCoverageStats(tenantId ?? undefined)
+      );
     }
 
     if (postcode) {

@@ -68,7 +68,7 @@ export default function FinalMilePage() {
           </div>
         )}
 
-        <ZoneReferenceBanner />
+        <ZoneReferenceBanner tenantId={activeTenant?.id ?? null} />
 
         <div className="border-b border-tac-border mb-6 flex gap-1 overflow-x-auto">
           {tabs.map((t) => (
