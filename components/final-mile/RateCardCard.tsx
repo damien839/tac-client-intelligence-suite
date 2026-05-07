@@ -7,6 +7,7 @@ import type {
   RateBasis,
   RateCardStatus,
 } from "@/lib/db/types";
+import ThinkingIndicator from "@/components/shared/ThinkingIndicator";
 
 interface RateCardCardProps {
   card: FreightRateCardWithDetails;
@@ -273,14 +274,17 @@ export default function RateCardCard({ card, onChanged }: RateCardCardProps) {
             Runs across all {card.lines.length} lines. ⌘/Ctrl + Enter to apply. Review the
             table below — every change is editable.
           </p>
-          <button
-            type="button"
-            onClick={runTransform}
-            disabled={!instruction.trim() || running}
-            className="bg-tac-accent text-tac-bg font-semibold px-4 py-1.5 rounded text-sm hover:bg-tac-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {running ? "Applying…" : "Apply instruction"}
-          </button>
+          <div className="flex items-center gap-3 flex-wrap">
+            {running && <ThinkingIndicator inline kind="transform" />}
+            <button
+              type="button"
+              onClick={runTransform}
+              disabled={!instruction.trim() || running}
+              className="bg-tac-accent text-tac-bg font-semibold px-4 py-1.5 rounded text-sm hover:bg-tac-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {running ? "Applying…" : "Apply instruction"}
+            </button>
+          </div>
         </div>
         {transformError && (
           <div className="rounded border border-tac-danger/40 bg-tac-danger/10 px-3 py-2 text-sm text-tac-danger">

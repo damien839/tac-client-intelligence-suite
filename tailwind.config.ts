@@ -26,6 +26,15 @@ const config: Config = {
       fontFamily: {
         poppins: ["Poppins", "sans-serif"],
       },
+      keyframes: {
+        "tac-bounce": {
+          "0%, 80%, 100%": { transform: "translateY(0)", opacity: "0.4" },
+          "40%": { transform: "translateY(-4px)", opacity: "1" },
+        },
+      },
+      animation: {
+        "tac-bounce": "tac-bounce 1.2s ease-in-out infinite",
+      },
     },
   },
   plugins: [],

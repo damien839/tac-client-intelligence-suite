@@ -8,6 +8,7 @@ import type {
   RateCardLineInput,
 } from "@/lib/actions/rate-cards";
 import { SERVICE_LEVEL_OPTIONS } from "@/lib/constants/service-levels";
+import ThinkingIndicator from "@/components/shared/ThinkingIndicator";
 
 interface RateCardUploaderProps {
   tenantId: string;
@@ -438,17 +439,18 @@ export default function RateCardUploader({
               download CSV template
             </button>
             <label
-              className={`text-sm border border-tac-border px-3 py-1.5 rounded hover:border-tac-accent cursor-pointer ${
-                parsing ? "opacity-60 pointer-events-none" : ""
+              className={`text-sm border border-tac-border px-3 py-1.5 rounded hover:border-tac-accent cursor-pointer inline-flex items-center gap-2 ${
+                parsing ? "opacity-80 pointer-events-none" : ""
               }`}
             >
-              {parsing === "ai"
-                ? "Extracting…"
-                : parsing === "excel"
-                ? "Reading Excel…"
-                : parsing === "csv"
-                ? "Reading CSV…"
-                : "Upload file"}
+              {parsing ? (
+                <ThinkingIndicator
+                  inline
+                  kind={parsing === "ai" ? "extract" : "upload"}
+                />
+              ) : (
+                "Upload file"
+              )}
               <input
                 type="file"
                 accept=".csv,.xlsx,.xls,.pdf,.png,.jpg,.jpeg,.webp,.gif"

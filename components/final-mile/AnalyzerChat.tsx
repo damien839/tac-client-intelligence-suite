@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ThinkingIndicator from "@/components/shared/ThinkingIndicator";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -173,8 +174,9 @@ export default function AnalyzerChat({ tenantId }: AnalyzerChatProps) {
           <MessageBubble key={idx} message={m} />
         ))}
         {streaming && messages[messages.length - 1]?.content === "" && (
-          <div className="text-sm text-tac-muted italic">analyzing…</div>
+          <ThinkingIndicator kind="analyze" />
         )}
+        {executing && <ThinkingIndicator kind="analyze" />}
       </div>
 
       {error && (
