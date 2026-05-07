@@ -6,6 +6,7 @@ import { useTenant } from "@/lib/tenant-context";
 import CurrentRateCardsTab from "@/components/final-mile/CurrentRateCardsTab";
 import NewRateCardsTab from "@/components/final-mile/NewRateCardsTab";
 import BillingTab from "@/components/final-mile/BillingTab";
+import ZoneReferenceBanner from "@/components/final-mile/ZoneReferenceBanner";
 
 type TabKey = "current-rate-cards" | "new-rate-cards" | "billing";
 
@@ -66,6 +67,8 @@ export default function FinalMilePage() {
             </p>
           </div>
         )}
+
+        <ZoneReferenceBanner />
 
         <div className="border-b border-tac-border mb-6 flex gap-1 overflow-x-auto">
           {tabs.map((t) => (

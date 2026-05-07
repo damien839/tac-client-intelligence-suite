@@ -112,3 +112,24 @@ export interface FreightRateCardWithDetails extends FreightRateCard {
   carrier: Pick<Carrier, "id" | "name" | "code">;
   lines: FreightRateCardLine[];
 }
+
+export interface PostcodeZone {
+  postcode: string;
+  ap_base_zone: string | null;
+  ap_zone_z40: string | null;
+  toll_zone: string | null;
+  ap_z9_adl: string | null;
+  ap_z9_syd: string | null;
+  ap_z6_syd: string | null;
+  ap_z6_mel: string | null;
+  ap_z9_mel: string | null;
+  ap_z6_bne: string | null;
+  ap_z9_bne: string | null;
+  ap_z6_gld: string | null;
+  ap_z9_gld: string | null;
+  dhl_zone: string | null;
+  dhl_zone_name: string | null;
+  source_file: string | null;
+  imported_at: string;
+  updated_at: string;
+}
