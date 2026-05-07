@@ -107,3 +107,8 @@ export interface FreightShipmentVolume {
 export interface FreightShipmentVolumeWithCarrier extends FreightShipmentVolume {
   carrier: Pick<Carrier, "id" | "name" | "code">;
 }
+
+export interface FreightRateCardWithDetails extends FreightRateCard {
+  carrier: Pick<Carrier, "id" | "name" | "code">;
+  lines: FreightRateCardLine[];
+}
