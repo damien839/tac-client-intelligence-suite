@@ -15,30 +15,33 @@ interface ThinkingIndicatorProps {
   className?: string;
 }
 
+// Keep each line ≤ 26 characters so it fits in the fixed-width inline pill
+// without truncation. The pill has a stable width regardless of message
+// length so surrounding buttons don't shift around.
 const MESSAGES: Record<ThinkingKind, readonly string[]> = {
   extract: [
-    "asking Claude to read your rate card…",
-    "decoding rate-card hieroglyphs…",
-    "training my eyes on this file…",
-    "extracting rates from the wild…",
+    "reading your rate card…",
+    "decoding hieroglyphs…",
+    "training my eyes…",
+    "extracting rates…",
     "spreadsheet whispering…",
     "wrangling weight breaks…",
   ],
   transform: [
-    "applying your instruction…",
+    "applying instruction…",
     "rewriting rate lines…",
     "doing the freight maths…",
-    "GST-wrangling in progress…",
-    "negotiating with the rate matrix…",
-    "consulting the carrier oracle…",
+    "GST-wrangling…",
+    "negotiating the matrix…",
+    "asking the oracle…",
   ],
   analyze: [
-    "thinking through the numbers…",
+    "thinking it through…",
     "checking volume tables…",
-    "running the savings model…",
-    "asking the data politely…",
-    "lining up zones and weights…",
-    "looking for the cheap kilos…",
+    "running the model…",
+    "asking the data nicely…",
+    "lining up zones…",
+    "hunting cheap kilos…",
   ],
   upload: [
     "reading your file…",
@@ -55,6 +58,7 @@ const MESSAGES: Record<ThinkingKind, readonly string[]> = {
 };
 
 const ROTATE_MS = 1800;
+const INLINE_MAX_CHARS = 26;
 
 export default function ThinkingIndicator({
   kind = "generic",
@@ -83,14 +87,18 @@ export default function ThinkingIndicator({
   );
 
   if (inline) {
+    const text = messages[idx];
+    const display =
+      text.length > INLINE_MAX_CHARS ? `${text.slice(0, INLINE_MAX_CHARS - 1)}…` : text;
     return (
       <span
         role="status"
         aria-live="polite"
-        className={`inline-flex items-center gap-2 text-tac-muted italic ${className}`}
+        title={text}
+        className={`inline-flex items-center gap-2 text-tac-muted italic w-[15rem] shrink-0 ${className}`}
       >
         {dots}
-        <span>{messages[idx]}</span>
+        <span className="truncate flex-1 min-w-0">{display}</span>
       </span>
     );
   }
