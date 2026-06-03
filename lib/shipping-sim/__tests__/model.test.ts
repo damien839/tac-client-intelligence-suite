@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { revealedPremium, landedTier } from "@/lib/shipping-sim/model";
+import {
+  revealedPremium,
+  landedTier,
+  currentScenario,
+  proposedScenario,
+  simulate,
+} from "@/lib/shipping-sim/model";
 import { Scheme, TaggedOrder, TierConfig } from "@/lib/shipping-sim/types";
 
 const std: TierConfig = { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 };
@@ -41,5 +47,74 @@ describe("landedTier", () => {
   it("drops to cheapest when the chosen tier is removed from the proposed scheme", () => {
     const proposed: Scheme = { standard: { ...std, fee: 12, freeThreshold: 150 } };
     expect(landedTier(order(140, "express"), current, proposed)).toBe("standard");
+  });
+});
+
+describe("currentScenario", () => {
+  it("sums revenue and carrier cost from the actual chosen tiers", () => {
+    const orders: TaggedOrder[] = [
+      order(80, "standard"), // std fee 10, cost 7
+      order(150, "standard"), // std free 0, cost 7
+      order(150, "express"), // exp fee 15, cost 12
+    ];
+    const r = currentScenario(orders, current);
+    expect(r.shippingRevenue).toBe(25); // 10 + 0 + 15
+    expect(r.carrierSpend).toBe(26); // 7 + 7 + 12
+    expect(r.netShippingProfit).toBe(-1);
+    expect(r.ordersByTier).toEqual({ standard: 2, express: 1, nextday: 0, sameday: 0 });
+  });
+});
+
+describe("proposedScenario", () => {
+  it("routes each order through landedTier and counts tier switches", () => {
+    // gross 140, chose express (revealed premium 15); proposed express premium 20 -> drops to standard
+    const orders: TaggedOrder[] = [order(140, "express")];
+    const proposed: Scheme = {
+      standard: { ...std, fee: 10, freeThreshold: 150 },
+      express: { ...exp, fee: 30, freeThreshold: 200 },
+    };
+    const r = proposedScenario(orders, current, proposed);
+    expect(r.ordersByTier.standard).toBe(1);
+    expect(r.ordersByTier.express).toBe(0);
+  });
+});
+
+describe("simulate", () => {
+  it("computes deltas, reconciliation, and omits cogs context when no cogs", () => {
+    const orders: TaggedOrder[] = [
+      { gross: 80, shippingPaid: 10, rawService: "x", tier: "standard" },
+      { gross: 150, shippingPaid: 15, rawService: "x", tier: "express" },
+    ];
+    // Proposal: standard free over 150 (so the $80 order still pays), express premium rises
+    const proposed: Scheme = {
+      standard: { tier: "standard", fee: 15, freeThreshold: 150, avgCost: 7 },
+      express: { tier: "express", fee: 25, freeThreshold: 250, avgCost: 12 },
+    };
+    const b = simulate(orders, current, proposed, undefined);
+    expect(b.reconciliation.actualShippingPaid).toBe(25); // 10 + 15
+    expect(b.reconciliation.modelledCurrentRevenue).toBe(b.current.shippingRevenue);
+    expect(b.netProfitDelta).toBe(b.shippingRevenueDelta - b.carrierSpendDelta);
+    expect(b.cogsContext).toBeUndefined();
+  });
+
+  it("adds cogs context without changing the delta", () => {
+    const orders: TaggedOrder[] = [order(80, "standard")];
+    const proposed: Scheme = { standard: { ...std, fee: 12 } };
+    const withCogs = simulate(orders, current, proposed, 0.3);
+    const without = simulate(orders, current, proposed, undefined);
+    expect(withCogs.netProfitDelta).toBe(without.netProfitDelta);
+    expect(withCogs.cogsContext).toEqual({ cogsPercent: 0.3, grossProductMargin: 80 * 0.7 });
+  });
+
+  it("reconciliation variance is 0 when actual paid is 0 (guard)", () => {
+    const orders: TaggedOrder[] = [{ gross: 80, shippingPaid: 0, rawService: "x", tier: "standard" }];
+    const b = simulate(orders, current, { standard: std }, undefined);
+    expect(b.reconciliation.variancePct).toBe(0);
+  });
+
+  it("handles empty orders without throwing", () => {
+    const b = simulate([], current, { standard: std }, undefined);
+    expect(b.current.shippingRevenue).toBe(0);
+    expect(b.reconciliation.variancePct).toBe(0);
   });
 });

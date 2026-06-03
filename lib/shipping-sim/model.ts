@@ -1,5 +1,5 @@
 import { cheapestTier, tierCost } from "./tiers";
-import { CanonicalTier, Scheme, TaggedOrder } from "./types";
+import { CanonicalTier, ScenarioResult, Scheme, TaggedOrder } from "./types";
 
 /**
  * Speed premium the customer revealed under the current scheme:
@@ -31,4 +31,102 @@ export function landedTier(
   if (!chosen) return cheapest.tier; // chosen tier no longer offered
   const stayPremium = tierCost(chosen, order.gross) - cheapest.cost;
   return stayPremium <= premium ? order.tier : cheapest.tier;
+}
+
+function emptyByTier(): Record<CanonicalTier, number> {
+  return { standard: 0, express: 0, nextday: 0, sameday: 0 };
+}
+
+/** Current state: each order stays in its actual chosen tier. */
+export function currentScenario(
+  orders: TaggedOrder[],
+  scheme: Scheme
+): ScenarioResult {
+  let shippingRevenue = 0;
+  let carrierSpend = 0;
+  const ordersByTier = emptyByTier();
+  for (const o of orders) {
+    const config = scheme[o.tier];
+    if (!config) continue;
+    shippingRevenue += tierCost(config, o.gross);
+    carrierSpend += config.avgCost;
+    ordersByTier[o.tier] += 1;
+  }
+  return {
+    shippingRevenue,
+    carrierSpend,
+    ordersByTier,
+    netShippingProfit: shippingRevenue - carrierSpend,
+  };
+}
+
+/** Proposed state: each order lands per the revealed-WTP model. */
+export function proposedScenario(
+  orders: TaggedOrder[],
+  current: Scheme,
+  proposed: Scheme
+): ScenarioResult {
+  let shippingRevenue = 0;
+  let carrierSpend = 0;
+  const ordersByTier = emptyByTier();
+  for (const o of orders) {
+    const landed = landedTier(o, current, proposed);
+    const config = proposed[landed];
+    if (!config) continue;
+    shippingRevenue += tierCost(config, o.gross);
+    carrierSpend += config.avgCost;
+    ordersByTier[landed] += 1;
+  }
+  return {
+    shippingRevenue,
+    carrierSpend,
+    ordersByTier,
+    netShippingProfit: shippingRevenue - carrierSpend,
+  };
+}
+
+/** Full current-vs-proposed benchmark. */
+export function simulate(
+  orders: TaggedOrder[],
+  current: Scheme,
+  proposed: Scheme,
+  cogsPercent?: number
+) {
+  const currentResult = currentScenario(orders, current);
+  const proposedResult = proposedScenario(orders, current, proposed);
+
+  const actualShippingPaid = orders.reduce((s, o) => s + o.shippingPaid, 0);
+  const variancePct =
+    actualShippingPaid > 0
+      ? Math.abs(currentResult.shippingRevenue - actualShippingPaid) /
+        actualShippingPaid
+      : 0;
+
+  const shippingRevenueDelta =
+    proposedResult.shippingRevenue - currentResult.shippingRevenue;
+  const carrierSpendDelta =
+    proposedResult.carrierSpend - currentResult.carrierSpend;
+
+  const cogsContext =
+    cogsPercent !== undefined
+      ? {
+          cogsPercent,
+          grossProductMargin:
+            orders.reduce((s, o) => s + o.gross, 0) * (1 - cogsPercent),
+        }
+      : undefined;
+
+  return {
+    current: currentResult,
+    proposed: proposedResult,
+    shippingRevenueDelta,
+    carrierSpendDelta,
+    netProfitDelta: shippingRevenueDelta - carrierSpendDelta,
+    reconciliation: {
+      actualShippingPaid,
+      modelledCurrentRevenue: currentResult.shippingRevenue,
+      variancePct,
+    },
+    ...(cogsContext ? { cogsContext } : {}),
+  };
 }
