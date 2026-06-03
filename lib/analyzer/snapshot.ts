@@ -28,33 +28,53 @@ export interface AnalyzerSnapshot {
 export async function buildAnalyzerSnapshot(tenantId: string): Promise<AnalyzerSnapshot> {
   const supabase = getSupabaseAdmin();
 
-  const [tenantRes, volumesRes, currentCardsRes, newCardsRes] = await Promise.all([
-    supabase.from("tenants").select("*").eq("id", tenantId).maybeSingle(),
-    supabase
-      .from("freight_shipment_volumes")
-      .select("*, carrier:carriers!inner(id, name, code)")
-      .eq("tenant_id", tenantId),
-    supabase
-      .from("freight_rate_cards")
-      .select("*, carrier:carriers!inner(id, name, code), lines:freight_rate_card_lines(*)")
-      .eq("tenant_id", tenantId)
-      .eq("status", "current"),
-    supabase
-      .from("freight_rate_cards")
-      .select("*, carrier:carriers!inner(id, name, code), lines:freight_rate_card_lines(*)")
-      .eq("tenant_id", tenantId)
-      .eq("status", "new"),
-  ]);
+  // Read from the unified view so we get manual_csv summary rows AND
+  // aggregated billing-extract lines in one shape. See migration
+  // 00010_shipment_volumes_unified.sql. Views don't expose FK relationships
+  // to PostgREST, so we fetch carriers separately and merge in JS rather
+  // than using a `carrier:carriers!inner(...)` embed.
+  const [tenantRes, volumesRes, currentCardsRes, newCardsRes, carriersRes] =
+    await Promise.all([
+      supabase.from("tenants").select("*").eq("id", tenantId).maybeSingle(),
+      supabase
+        .from("shipment_volumes_unified")
+        .select("*")
+        .eq("tenant_id", tenantId),
+      supabase
+        .from("freight_rate_cards")
+        .select(
+          "*, carrier:carriers!inner(id, name, code), lines:freight_rate_card_lines(*)"
+        )
+        .eq("tenant_id", tenantId)
+        .eq("status", "current"),
+      supabase
+        .from("freight_rate_cards")
+        .select(
+          "*, carrier:carriers!inner(id, name, code), lines:freight_rate_card_lines(*)"
+        )
+        .eq("tenant_id", tenantId)
+        .eq("status", "new"),
+      supabase.from("carriers").select("id, name, code"),
+    ]);
 
   if (tenantRes.error) throw new Error(`snapshot: tenant load failed — ${tenantRes.error.message}`);
   if (!tenantRes.data) throw new Error(`snapshot: tenant ${tenantId} not found`);
   if (volumesRes.error) throw new Error(`snapshot: volumes — ${volumesRes.error.message}`);
   if (currentCardsRes.error) throw new Error(`snapshot: current cards — ${currentCardsRes.error.message}`);
   if (newCardsRes.error) throw new Error(`snapshot: new cards — ${newCardsRes.error.message}`);
+  if (carriersRes.error) throw new Error(`snapshot: carriers — ${carriersRes.error.message}`);
+
+  const carrierById = new Map(
+    (carriersRes.data ?? []).map((c) => [c.id, c as Pick<Carrier, "id" | "name" | "code">])
+  );
+  const volumes = (volumesRes.data ?? []).map((v) => ({
+    ...(v as Record<string, unknown>),
+    carrier: carrierById.get((v as { carrier_id: string }).carrier_id) ?? null,
+  })) as unknown as FreightShipmentVolumeWithCarrier[];
 
   return {
     tenant: tenantRes.data as Tenant,
-    volumes: (volumesRes.data ?? []) as unknown as FreightShipmentVolumeWithCarrier[],
+    volumes,
     current_rate_cards: (currentCardsRes.data ?? []) as unknown as RateCardWithLines[],
     new_rate_cards: (newCardsRes.data ?? []) as unknown as RateCardWithLines[],
     generated_at: new Date().toISOString(),

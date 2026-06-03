@@ -90,6 +90,7 @@ export interface FreightShipmentVolume {
   tenant_id: string;
   carrier_id: string;
   service_level: string;
+  canonical_tier: string | null;
   zone_label: string;
   monthly_shipments: number;
   avg_charge_aud: number;
@@ -102,6 +103,21 @@ export interface FreightShipmentVolume {
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface CarrierServiceAlias {
+  id: string;
+  carrier_id: string;
+  tenant_id: string | null;
+  raw_label: string;
+  canonical_tier: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CarrierServiceAliasWithCarrier extends CarrierServiceAlias {
+  carrier: Pick<Carrier, "id" | "name" | "code">;
 }
 
 export interface FreightShipmentVolumeWithCarrier extends FreightShipmentVolume {

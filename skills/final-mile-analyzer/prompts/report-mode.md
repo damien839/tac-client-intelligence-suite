@@ -39,6 +39,15 @@ When data is missing or ambiguous, **report what you can and add a warning**. Do
 
 Produce every section listed in `references/report-structure.md`, in order. If a section has no data (e.g. no DIM-billed risk lanes), include the section with an empty array and a one-line note explaining why — don't omit it. The schema enforces presence.
 
+### Context & approach (first section)
+
+Every report opens with a **Context & approach** section that lets the reader confirm scope *before* they read any numbers. Two parts:
+
+1. **`context_confirmation`** — deterministic, populated by the engine. Confirms tenant, period, currency, total volume in scope, current carriers + service levels analysed, replacement carriers + service levels compared, assumptions (density, residential mix, fuel mode, overrides), and exclusions (unmatched lanes, coverage gaps). Do not modify these fields — they are produced upstream.
+2. **`analyst_summary`** — 2-5 sentence narrative you write. State what comparison was performed (carrier stack vs carrier stack), the period and volume in scope, the method used (e.g. weighted CPO, lognormal weight distribution, default fuel view), and any notable caveat from `context_confirmation` (e.g. high unmapped-state share, a service-tier gap held at current cost). Read like a senior analyst opening a deck: no headline numbers, no recommendations, no fluff. Past-tense for what was done, present-tense for what the report shows.
+
+The analyst_summary must be consistent with `context_confirmation` — never name a carrier or assumption that doesn't appear there.
+
 ### Tone
 
 TAC client-facing. Operator-first. Lead with the dollar number, then the lane, then the why. No fluff. Headlines without hedge words. Methodology footer can carry caveats.

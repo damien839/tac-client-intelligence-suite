@@ -1,19 +1,24 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "TAC Final Mile Analyzer Report",
-  "description": "Report payload produced by the analyzer in Execute Analysis mode. Renders to the client-facing report page.",
+  "description": "Report payload produced by the analyzer in Execute Analysis mode. Numeric fields are produced by the deterministic engine (lib/analyzer/cost.ts + distribution.ts). Claude only writes narrative strings (framing, consultant_note, rationale, confidence_note) and the critic's review_findings. Renders to the client-facing report page.",
   "type": "object",
   "required": [
     "schema_version",
     "report_state",
+    "brief",
     "header",
+    "context_confirmation",
+    "analyst_summary",
     "headline_savings",
     "spend_comparison",
-    "region_breakdown",
-    "cube_analysis",
+    "drilldown",
+    "service_tier_pairs",
+    "coverage_gaps",
     "top_opportunities",
     "recommendations",
     "warnings",
+    "review",
     "methodology"
   ],
   "additionalProperties": false,
@@ -21,12 +26,70 @@
     "schema_version": {
       "type": "string",
       "description": "Schema version this payload was generated against.",
-      "const": "0.1.0"
+      "const": "0.4.0"
     },
     "report_state": {
       "type": "string",
-      "enum": ["final", "draft_only"],
-      "description": "draft_only when any block-severity warning fires."
+      "enum": ["final", "draft_only", "blocked"],
+      "description": "blocked when a hard precondition fails (e.g. unresolved service-tier gap or critic verdict=block). draft_only when any block-severity warning fires but the report is still renderable."
+    },
+    "brief": {
+      "type": "object",
+      "description": "The analysis brief — the resolved set of inputs and assumptions used to compute this report.",
+      "required": [
+        "period_label",
+        "density_kg_per_m3",
+        "residential_mix_pct",
+        "default_fuel_mode",
+        "per_carrier_fuel_overrides",
+        "service_tier_pair_overrides",
+        "notes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "period_label": { "type": "string" },
+        "density_kg_per_m3": { "type": "number" },
+        "residential_mix_pct": { "type": "number" },
+        "default_fuel_mode": {
+          "type": "string",
+          "enum": ["base", "with_fuel", "with_all_surcharges"]
+        },
+        "per_carrier_fuel_overrides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["carrier_code", "fuel_pct", "note"],
+            "additionalProperties": false,
+            "properties": {
+              "carrier_code": { "type": "string" },
+              "fuel_pct": { "type": "number" },
+              "note": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "service_tier_pair_overrides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "volume_carrier_code",
+              "volume_service_level",
+              "chosen_replacement_rate_card_id"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "volume_carrier_code": { "type": "string" },
+              "volume_service_level": { "type": "string" },
+              "chosen_replacement_rate_card_id": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "notes": { "type": ["string", "null"] },
+        "excluded_lane_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
     },
     "header": {
       "type": "object",
@@ -38,7 +101,8 @@
         "total_monthly_shipments",
         "current_monthly_spend",
         "confidence_score",
-        "confidence_note"
+        "confidence_note",
+        "default_fuel_mode"
       ],
       "additionalProperties": false,
       "properties": {
@@ -49,105 +113,336 @@
         "total_monthly_shipments": { "type": "number" },
         "current_monthly_spend": { "type": "number" },
         "confidence_score": { "type": "integer", "minimum": 0, "maximum": 100 },
-        "confidence_note": { "type": "string" }
+        "confidence_note": { "type": "string" },
+        "default_fuel_mode": {
+          "type": "string",
+          "enum": ["base", "with_fuel", "with_all_surcharges"]
+        }
       }
+    },
+    "context_confirmation": {
+      "type": "object",
+      "description": "Deterministic confirmation of what was analysed — tenant, period, carriers compared, assumptions and exclusions. Renders at the top of the report so the reader can verify scope before reading numbers.",
+      "required": [
+        "tenant",
+        "period",
+        "scope",
+        "current_carriers",
+        "replacement_carriers",
+        "assumptions",
+        "exclusions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tenant": {
+          "type": "object",
+          "required": ["name", "kind", "currency"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "kind": { "type": "string", "enum": ["client", "prospect"] },
+            "currency": { "type": "string" }
+          }
+        },
+        "period": {
+          "type": "object",
+          "required": ["label"],
+          "additionalProperties": false,
+          "properties": {
+            "label": { "type": "string" }
+          }
+        },
+        "scope": {
+          "type": "object",
+          "required": [
+            "total_monthly_shipments",
+            "lane_count",
+            "state_coverage_count",
+            "unmapped_state_pct"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "total_monthly_shipments": { "type": "number" },
+            "lane_count": { "type": "integer", "minimum": 0 },
+            "state_coverage_count": { "type": "integer", "minimum": 0 },
+            "unmapped_state_pct": { "type": "number" }
+          }
+        },
+        "current_carriers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "carrier_code",
+              "carrier_name",
+              "service_levels",
+              "monthly_shipments",
+              "monthly_spend_aud"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "carrier_code": { "type": "string" },
+              "carrier_name": { "type": "string" },
+              "service_levels": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "monthly_shipments": { "type": "number" },
+              "monthly_spend_aud": { "type": "number" }
+            }
+          }
+        },
+        "replacement_carriers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "carrier_code",
+              "carrier_name",
+              "service_levels",
+              "rate_card_count"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "carrier_code": { "type": "string" },
+              "carrier_name": { "type": "string" },
+              "service_levels": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "rate_card_count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "assumptions": {
+          "type": "object",
+          "required": [
+            "density_kg_per_m3",
+            "residential_mix_pct",
+            "default_fuel_mode",
+            "per_carrier_fuel_overrides",
+            "service_tier_pair_override_count"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "density_kg_per_m3": { "type": "number" },
+            "residential_mix_pct": { "type": "number" },
+            "default_fuel_mode": {
+              "type": "string",
+              "enum": ["base", "with_fuel", "with_all_surcharges"]
+            },
+            "per_carrier_fuel_overrides": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["carrier_code", "fuel_pct", "note"],
+                "additionalProperties": false,
+                "properties": {
+                  "carrier_code": { "type": "string" },
+                  "fuel_pct": { "type": "number" },
+                  "note": { "type": ["string", "null"] }
+                }
+              }
+            },
+            "service_tier_pair_override_count": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "exclusions": {
+          "type": "object",
+          "required": [
+            "unmatched_lane_count",
+            "unmatched_monthly_shipments",
+            "coverage_gap_count"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "unmatched_lane_count": { "type": "integer", "minimum": 0 },
+            "unmatched_monthly_shipments": { "type": "number" },
+            "coverage_gap_count": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "analyst_summary": {
+      "type": "string",
+      "description": "2-5 sentence narrative from the analyzer explaining what comparison was performed, how, and any key caveats — produced by the narrative LLM pass."
     },
     "headline_savings": {
       "type": "object",
       "required": [
+        "default_fuel_mode",
+        "current_annual_spend",
+        "projected_annual_spend",
         "annual_savings_aud",
         "monthly_savings_aud",
         "savings_pct",
-        "current_annual_spend",
-        "projected_annual_spend",
-        "framing"
+        "framing",
+        "fuel_views",
+        "sensitivity"
       ],
       "additionalProperties": false,
       "properties": {
+        "default_fuel_mode": {
+          "type": "string",
+          "enum": ["base", "with_fuel", "with_all_surcharges"]
+        },
+        "current_annual_spend": { "type": "number" },
+        "projected_annual_spend": { "type": "number" },
         "annual_savings_aud": { "type": "number" },
         "monthly_savings_aud": { "type": "number" },
         "savings_pct": { "type": "number" },
-        "current_annual_spend": { "type": "number" },
-        "projected_annual_spend": { "type": "number" },
         "framing": {
           "type": "string",
           "description": "One-sentence decision-framed summary of the headline number."
+        },
+        "fuel_views": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "All three fuel views — base, with_fuel, with_all_surcharges — so a tenant cannot trade cheap base rates for high fuel surprise.",
+          "items": {
+            "type": "object",
+            "required": [
+              "fuel_mode",
+              "current_monthly_spend",
+              "projected_monthly_spend",
+              "monthly_savings_aud",
+              "annual_savings_aud",
+              "savings_pct"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "fuel_mode": {
+                "type": "string",
+                "enum": ["base", "with_fuel", "with_all_surcharges"]
+              },
+              "current_monthly_spend": { "type": "number" },
+              "projected_monthly_spend": { "type": "number" },
+              "monthly_savings_aud": { "type": "number" },
+              "annual_savings_aud": { "type": "number" },
+              "savings_pct": { "type": "number" }
+            }
+          }
+        },
+        "sensitivity": {
+          "type": "object",
+          "description": "Low/mid/high annual savings band reflecting modelled uncertainty (e.g. weight distribution sigma, postcode coverage).",
+          "required": ["low_annual_aud", "mid_annual_aud", "high_annual_aud", "basis"],
+          "additionalProperties": false,
+          "properties": {
+            "low_annual_aud": { "type": "number" },
+            "mid_annual_aud": { "type": "number" },
+            "high_annual_aud": { "type": "number" },
+            "basis": { "type": "string" }
+          }
         }
       }
     },
     "spend_comparison": {
       "type": "object",
-      "required": ["chart_data", "table"],
+      "required": ["table", "alternates_by_lane"],
       "additionalProperties": false,
       "properties": {
-        "chart_data": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["label", "current_monthly_spend", "projected_monthly_spend"],
-            "additionalProperties": false,
-            "properties": {
-              "label": { "type": "string" },
-              "current_monthly_spend": { "type": "number" },
-              "projected_monthly_spend": { "type": "number" }
-            }
-          }
-        },
         "table": {
           "type": "array",
           "items": {
             "type": "object",
             "required": [
+              "lane_id",
               "carrier",
+              "carrier_code",
               "service_level",
+              "zone_label",
               "monthly_shipments",
+              "avg_weight_kg",
               "current_cpo",
               "projected_cpo",
               "cpo_delta_aud",
               "cpo_delta_pct",
               "monthly_savings",
-              "annual_savings"
+              "annual_savings",
+              "replacement_carrier",
+              "replacement_carrier_code",
+              "replacement_rate_card_id",
+              "status",
+              "coverage_match_pct"
             ],
             "additionalProperties": false,
             "properties": {
+              "lane_id": { "type": "string" },
               "carrier": { "type": "string" },
+              "carrier_code": { "type": "string" },
               "service_level": { "type": "string" },
+              "zone_label": { "type": "string" },
               "monthly_shipments": { "type": "number" },
+              "avg_weight_kg": { "type": ["number", "null"] },
               "current_cpo": { "type": "number" },
               "projected_cpo": { "type": "number" },
               "cpo_delta_aud": { "type": "number" },
               "cpo_delta_pct": { "type": "number" },
               "monthly_savings": { "type": "number" },
-              "annual_savings": { "type": "number" }
+              "annual_savings": { "type": "number" },
+              "replacement_carrier": { "type": ["string", "null"] },
+              "replacement_carrier_code": { "type": ["string", "null"] },
+              "replacement_rate_card_id": { "type": ["string", "null"] },
+              "status": {
+                "type": "string",
+                "enum": ["matched", "service_tier_gap", "no_zone_match", "partial_coverage"]
+              },
+              "coverage_match_pct": { "type": "number" }
+            }
+          }
+        },
+        "alternates_by_lane": {
+          "type": "object",
+          "description": "Map of lane_id -> ranked alternate replacement options. Lets the report show 'what if we picked Toll instead of Couriers Please' without recomputing.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "replacement_carrier",
+                "replacement_carrier_code",
+                "replacement_rate_card_id",
+                "projected_cpo",
+                "monthly_savings",
+                "annual_savings",
+                "coverage_match_pct"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "replacement_carrier": { "type": "string" },
+                "replacement_carrier_code": { "type": "string" },
+                "replacement_rate_card_id": { "type": "string" },
+                "projected_cpo": { "type": "number" },
+                "monthly_savings": { "type": "number" },
+                "annual_savings": { "type": "number" },
+                "coverage_match_pct": { "type": "number" }
+              }
             }
           }
         }
       }
     },
-    "region_breakdown": {
+    "drilldown": {
       "type": "object",
-      "required": ["chart_data", "table", "unmapped_pct"],
+      "description": "State > Region > Carrier-Zone > Size-Break drill paths derived from the deterministic distribution model.",
+      "required": [
+        "state_breakdown",
+        "region_breakdown",
+        "carrier_zone_breakdown",
+        "size_breaks",
+        "size_breaks_by_carrier",
+        "unmapped_state_pct"
+      ],
       "additionalProperties": false,
       "properties": {
-        "chart_data": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["region", "current_monthly_spend", "projected_monthly_spend"],
-            "additionalProperties": false,
-            "properties": {
-              "region": { "type": "string" },
-              "current_monthly_spend": { "type": "number" },
-              "projected_monthly_spend": { "type": "number" }
-            }
-          }
-        },
-        "table": {
+        "state_breakdown": {
           "type": "array",
           "items": {
             "type": "object",
             "required": [
-              "region",
+              "state",
               "share_pct",
               "monthly_shipments",
               "current_monthly_spend",
@@ -157,7 +452,7 @@
             ],
             "additionalProperties": false,
             "properties": {
-              "region": { "type": "string" },
+              "state": { "type": "string" },
               "share_pct": { "type": "number" },
               "monthly_shipments": { "type": "number" },
               "current_monthly_spend": { "type": "number" },
@@ -167,47 +462,194 @@
             }
           }
         },
-        "unmapped_pct": {
-          "type": "number",
-          "description": "% of monthly shipments that couldn't be classified to a state."
-        }
-      }
-    },
-    "cube_analysis": {
-      "type": "object",
-      "required": [
-        "total_monthly_cube_m3",
-        "total_annual_cube_m3",
-        "cost_per_m3_current",
-        "cost_per_m3_projected",
-        "density_assumption_kg_per_m3",
-        "estimation_note",
-        "dim_risk_lanes"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "total_monthly_cube_m3": { "type": "number" },
-        "total_annual_cube_m3": { "type": "number" },
-        "cost_per_m3_current": { "type": "number" },
-        "cost_per_m3_projected": { "type": "number" },
-        "density_assumption_kg_per_m3": { "type": "number" },
-        "estimation_note": {
-          "type": "string",
-          "description": "Plain-English note about how cube was derived (estimated vs measured)."
-        },
-        "dim_risk_lanes": {
+        "region_breakdown": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["lane", "avg_weight_kg", "estimated_dim_weight_kg", "note"],
+            "required": [
+              "state",
+              "region",
+              "monthly_shipments",
+              "current_monthly_spend",
+              "projected_monthly_spend",
+              "savings_aud"
+            ],
             "additionalProperties": false,
             "properties": {
-              "lane": { "type": "string" },
-              "avg_weight_kg": { "type": "number" },
-              "estimated_dim_weight_kg": { "type": "number" },
-              "note": { "type": "string" }
+              "state": { "type": "string" },
+              "region": {
+                "type": "string",
+                "enum": ["Metro", "Regional", "Remote"]
+              },
+              "monthly_shipments": { "type": "number" },
+              "current_monthly_spend": { "type": "number" },
+              "projected_monthly_spend": { "type": "number" },
+              "savings_aud": { "type": "number" }
             }
           }
+        },
+        "carrier_zone_breakdown": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "carrier_code",
+              "service_level",
+              "zone_label",
+              "monthly_shipments",
+              "current_monthly_spend",
+              "projected_monthly_spend",
+              "savings_aud",
+              "savings_pct"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "carrier_code": { "type": "string" },
+              "service_level": { "type": "string" },
+              "zone_label": { "type": "string" },
+              "monthly_shipments": { "type": "number" },
+              "current_monthly_spend": { "type": "number" },
+              "projected_monthly_spend": { "type": "number" },
+              "savings_aud": { "type": "number" },
+              "savings_pct": { "type": "number" }
+            }
+          }
+        },
+        "size_breaks": {
+          "type": "array",
+          "description": "Aggregate cost per parcel within each canonical weight bucket.",
+          "items": {
+            "type": "object",
+            "required": [
+              "bucket_id",
+              "weight_min_kg",
+              "weight_max_kg",
+              "label",
+              "share_pct",
+              "monthly_shipments",
+              "current_avg_cpo",
+              "projected_avg_cpo",
+              "cpo_delta_aud",
+              "monthly_savings",
+              "annual_savings"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "bucket_id": { "type": "string" },
+              "weight_min_kg": { "type": "number" },
+              "weight_max_kg": { "type": "number" },
+              "label": { "type": "string" },
+              "share_pct": { "type": "number" },
+              "monthly_shipments": { "type": "number" },
+              "current_avg_cpo": { "type": "number" },
+              "projected_avg_cpo": { "type": "number" },
+              "cpo_delta_aud": { "type": "number" },
+              "monthly_savings": { "type": "number" },
+              "annual_savings": { "type": "number" }
+            }
+          }
+        },
+        "size_breaks_by_carrier": {
+          "type": "array",
+          "description": "Per-(carrier,bucket) cost cells — used by the drill-down heatmap.",
+          "items": {
+            "type": "object",
+            "required": [
+              "carrier_code",
+              "bucket_id",
+              "current_avg_cpo",
+              "projected_avg_cpo",
+              "delta_aud"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "carrier_code": { "type": "string" },
+              "bucket_id": { "type": "string" },
+              "current_avg_cpo": { "type": "number" },
+              "projected_avg_cpo": { "type": "number" },
+              "delta_aud": { "type": "number" }
+            }
+          }
+        },
+        "unmapped_state_pct": {
+          "type": "number",
+          "description": "% of monthly shipments that couldn't be classified to a state via the carrier coverage × population model."
+        }
+      }
+    },
+    "service_tier_pairs": {
+      "type": "array",
+      "description": "Every (carrier × service_level) volume row paired with its eligible same-tier replacement rate cards. Drives the service-integrity table on the report.",
+      "items": {
+        "type": "object",
+        "required": [
+          "service_level",
+          "current_carrier_code",
+          "current_carrier_name",
+          "monthly_shipments",
+          "monthly_spend_aud",
+          "replacements",
+          "status"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "service_level": { "type": "string" },
+          "current_carrier_code": { "type": "string" },
+          "current_carrier_name": { "type": "string" },
+          "monthly_shipments": { "type": "number" },
+          "monthly_spend_aud": { "type": "number" },
+          "replacements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["carrier_code", "carrier_name", "rate_card_id"],
+              "additionalProperties": false,
+              "properties": {
+                "carrier_code": { "type": "string" },
+                "carrier_name": { "type": "string" },
+                "rate_card_id": { "type": "string" }
+              }
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["matched", "gap_no_equivalent"]
+          }
+        }
+      }
+    },
+    "coverage_gaps": {
+      "type": "array",
+      "description": "Postcodes/states the proposed replacement carrier doesn't cover for a given service. Forces the report to surface 'we'd lose X% of NSW deliveries' rather than silently hiding it.",
+      "items": {
+        "type": "object",
+        "required": [
+          "carrier_code",
+          "service_code",
+          "service_level",
+          "uncovered_postcode_count",
+          "uncovered_state_share",
+          "exposure_aud_per_month"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "carrier_code": { "type": "string" },
+          "service_code": { "type": "string" },
+          "service_level": { "type": "string" },
+          "uncovered_postcode_count": { "type": "number" },
+          "uncovered_state_share": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["state", "share_pct"],
+              "additionalProperties": false,
+              "properties": {
+                "state": { "type": "string" },
+                "share_pct": { "type": "number" }
+              }
+            }
+          },
+          "exposure_aud_per_month": { "type": "number" }
         }
       }
     },
@@ -219,19 +661,23 @@
         "type": "object",
         "required": [
           "rank",
+          "lane_id",
           "lane",
           "annual_savings_aud",
           "per_parcel_delta_aud",
           "monthly_volume",
+          "replacement_carrier",
           "consultant_note"
         ],
         "additionalProperties": false,
         "properties": {
           "rank": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "lane_id": { "type": "string" },
           "lane": { "type": "string" },
           "annual_savings_aud": { "type": "number" },
           "per_parcel_delta_aud": { "type": "number" },
           "monthly_volume": { "type": "number" },
+          "replacement_carrier": { "type": "string" },
           "consultant_note": { "type": "string" }
         }
       }
@@ -242,12 +688,16 @@
       "maxItems": 7,
       "items": {
         "type": "object",
-        "required": ["title", "rationale"],
+        "required": ["title", "rationale", "estimated_impact_aud_per_year", "linked_lane_ids"],
         "additionalProperties": false,
         "properties": {
           "title": { "type": "string" },
           "rationale": { "type": "string" },
-          "estimated_impact_aud_per_year": { "type": ["number", "null"] }
+          "estimated_impact_aud_per_year": { "type": ["number", "null"] },
+          "linked_lane_ids": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
         }
       }
     },
@@ -255,7 +705,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["code", "severity", "title", "body"],
+        "required": ["code", "severity", "title", "body", "linked_section"],
         "additionalProperties": false,
         "properties": {
           "code": { "type": "string" },
@@ -269,10 +719,85 @@
         }
       }
     },
+    "review": {
+      "type": "object",
+      "description": "Adversarial critic pass. The critic challenges the numbers, methodology, table integrity, recommendations, and narrative; sets customer_facing_ready and emits categorised findings. verdict=block flips report_state to blocked.",
+      "required": [
+        "verdict",
+        "revision_count",
+        "findings",
+        "customer_facing_ready",
+        "readiness_summary",
+        "readiness_blockers",
+        "strengths"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": ["pass", "needs_revision", "block"]
+        },
+        "revision_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of revise loops executed before reaching the final verdict (capped upstream)."
+        },
+        "customer_facing_ready": {
+          "type": "boolean",
+          "description": "True only if the report is defensible as-is in front of a client. False if there are unresolved analytical concerns, missing context, or risky claims."
+        },
+        "readiness_summary": {
+          "type": "string",
+          "description": "2-4 sentence plain-English summary of what would have to change for this report to be customer-facing-ready, or why it already is."
+        },
+        "readiness_blockers": {
+          "type": "array",
+          "description": "Short bullet labels of the specific issues that, if unresolved, would stop this report from being shared with a client. Empty array if customer_facing_ready is true.",
+          "items": { "type": "string" }
+        },
+        "strengths": {
+          "type": "array",
+          "description": "Short bullet labels of what the analysis does well — surfaces credibility signals (e.g. weighted CPO, transparent unmatched lane handling). Helps the consultant frame the deliverable. 0-5 items.",
+          "items": { "type": "string" }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["severity", "claim", "issue", "evidence", "fix", "linked_section", "category"],
+            "additionalProperties": false,
+            "properties": {
+              "severity": { "type": "string", "enum": ["info", "warn", "block"] },
+              "category": {
+                "type": "string",
+                "enum": [
+                  "math",
+                  "methodology",
+                  "table_analysis",
+                  "recommendations",
+                  "narrative",
+                  "context",
+                  "customer_facing",
+                  "general"
+                ]
+              },
+              "claim": { "type": "string" },
+              "issue": { "type": "string" },
+              "evidence": { "type": "string" },
+              "fix": { "type": ["string", "null"] },
+              "linked_section": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
     "methodology": {
       "type": "object",
       "required": [
         "density_assumption_kg_per_m3",
+        "default_fuel_mode",
+        "weight_distribution_basis",
+        "postcode_distribution_basis",
         "surcharge_treatment",
         "unmatched_treatment",
         "confidence_formula_plain_english"
@@ -280,6 +805,12 @@
       "additionalProperties": false,
       "properties": {
         "density_assumption_kg_per_m3": { "type": "number" },
+        "default_fuel_mode": {
+          "type": "string",
+          "enum": ["base", "with_fuel", "with_all_surcharges"]
+        },
+        "weight_distribution_basis": { "type": "string" },
+        "postcode_distribution_basis": { "type": "string" },
         "surcharge_treatment": { "type": "string" },
         "unmatched_treatment": { "type": "string" },
         "confidence_formula_plain_english": { "type": "string" }
