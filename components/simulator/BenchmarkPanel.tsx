@@ -1,148 +1,75 @@
 "use client";
 
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
-import MetricCard from "@/components/shared/MetricCard";
-import { Benchmark, CANONICAL_TIERS, TIER_LABELS } from "@/lib/shipping-sim/types";
-import { formatCurrency, formatPercent } from "@/lib/calculations";
+import { Analysis, Scheme } from "@/lib/shipping-sim/types";
+import VerdictHeader from "./analysis/VerdictHeader";
+import ReconciliationBadge from "./analysis/ReconciliationBadge";
+import ProfitBridge from "./analysis/ProfitBridge";
+import RecoveryGauges from "./analysis/RecoveryGauges";
+import TierEconomicsTable from "./analysis/TierEconomicsTable";
+import MovementTable from "./analysis/MovementTable";
+import CarrierMixChart from "./analysis/CarrierMixChart";
+import AovDistribution, { ThresholdMarker } from "./analysis/AovDistribution";
+import ThresholdSweepChart from "./analysis/ThresholdSweepChart";
+import Findings from "./analysis/Findings";
 
 interface BenchmarkPanelProps {
-  benchmark: Benchmark;
+  analysis: Analysis;
+  currentScheme: Scheme;
+  proposedScheme: Scheme;
+  monthlyOrders?: number;
 }
 
-export default function BenchmarkPanel({ benchmark }: BenchmarkPanelProps) {
-  const { current, proposed, reconciliation } = benchmark;
+export default function BenchmarkPanel({
+  analysis,
+  currentScheme,
+  proposedScheme,
+  monthlyOrders,
+}: BenchmarkPanelProps) {
+  // AOV threshold markers (only tiers with a real free-over line)
+  const markers: ThresholdMarker[] = [];
+  const cs = currentScheme.standard;
+  const ps = proposedScheme.standard;
+  const ce = currentScheme.express;
+  const pe = proposedScheme.express;
+  if (cs && cs.freeThreshold !== null) markers.push({ value: cs.freeThreshold, label: "Std now", color: "#A0AEB8" });
+  if (ps && ps.freeThreshold !== null) markers.push({ value: ps.freeThreshold, label: "Std new", color: "#F5B36B" });
+  if (ce && ce.freeThreshold !== null) markers.push({ value: ce.freeThreshold, label: "Exp now", color: "#6088aa" });
+  if (pe && pe.freeThreshold !== null) markers.push({ value: pe.freeThreshold, label: "Exp new", color: "#c08a4a" });
 
-  const mixData = CANONICAL_TIERS.filter(
-    (t) => current.ordersByTier[t] > 0 || proposed.ordersByTier[t] > 0
-  ).map((t) => ({
-    tier: TIER_LABELS[t],
-    Current: current.ordersByTier[t],
-    Proposed: proposed.ordersByTier[t],
-  }));
-
-  const reconHigh = reconciliation.variancePct > 0.1;
-  const reconOvershoot = reconciliation.variancePct > 1;
-  const reconText = reconOvershoot
-    ? `Current-scheme model is ${formatPercent(reconciliation.variancePct)} above actual shipping revenue`
-    : `Current-scheme model reproduces ${formatPercent(1 - reconciliation.variancePct)} of actual shipping revenue`;
-
-  // Revenue & profit: a positive delta is good. Carrier spend: a negative (lower) delta is good.
-  const goodIfPositive = (d: number): "up" | "down" | "neutral" =>
-    d > 0 ? "up" : d < 0 ? "down" : "neutral";
-  const goodIfNegative = (d: number): "up" | "down" | "neutral" =>
-    d < 0 ? "up" : d > 0 ? "down" : "neutral";
+  const currentStdThreshold = cs && cs.freeThreshold !== null ? cs.freeThreshold : 0;
+  const proposedStdThreshold = ps && ps.freeThreshold !== null ? ps.freeThreshold : 0;
 
   return (
-    <div className="space-y-6">
-      {/* Reconciliation badge */}
-      <div
-        className={`p-3 rounded-lg border text-sm ${
-          reconHigh
-            ? "bg-tac-danger/10 border-tac-danger/30 text-tac-danger"
-            : "bg-tac-success/10 border-tac-success/30 text-tac-success"
-        }`}
-      >
-        {reconText} ({formatCurrency(reconciliation.modelledCurrentRevenue)} modelled vs{" "}
-        {formatCurrency(reconciliation.actualShippingPaid)} actual).
-        {reconHigh && " High variance — re-check the current scheme before trusting the proposal."}
+    <div className="space-y-8">
+      <VerdictHeader analysis={analysis} />
+
+      <ReconciliationBadge reconciliation={analysis.benchmark.reconciliation} />
+
+      <ProfitBridge benchmark={analysis.benchmark} />
+
+      <RecoveryGauges current={analysis.recoveryCurrent} proposed={analysis.recoveryProposed} />
+
+      <TierEconomicsTable
+        current={analysis.tierEconomicsCurrent}
+        proposed={analysis.tierEconomicsProposed}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <MovementTable movement={analysis.movement} />
+        <CarrierMixChart current={analysis.benchmark.current} proposed={analysis.benchmark.proposed} />
       </div>
 
-      {/* Headline deltas */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <MetricCard
-          label="Δ Shipping Revenue"
-          value={formatCurrency(benchmark.shippingRevenueDelta)}
-          trend={goodIfPositive(benchmark.shippingRevenueDelta)}
-          trendValue="vs current"
-        />
-        <MetricCard
-          label="Δ Carrier Spend"
-          value={formatCurrency(benchmark.carrierSpendDelta)}
-          trend={goodIfNegative(benchmark.carrierSpendDelta)}
-          trendValue="vs current"
-        />
-        <MetricCard
-          label="Net Profit Δ"
-          value={formatCurrency(benchmark.netProfitDelta)}
-          trend={goodIfPositive(benchmark.netProfitDelta)}
-          trendValue="vs current"
-          accent
-        />
-      </div>
+      <AovDistribution movement={analysis.movement} markers={markers} />
 
-      {/* Current vs proposed table */}
-      <div className="card overflow-x-auto">
-        <h3 className="text-lg font-semibold mb-4 text-tac-accent">Current vs Proposed</h3>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-tac-border text-tac-muted">
-              <th className="text-left py-2">Metric</th>
-              <th className="text-right py-2 px-3">Current</th>
-              <th className="text-right py-2 px-3">Proposed</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="border-b border-tac-border/50">
-              <td className="py-2">Shipping revenue</td>
-              <td className="text-right px-3">{formatCurrency(current.shippingRevenue)}</td>
-              <td className="text-right px-3">{formatCurrency(proposed.shippingRevenue)}</td>
-            </tr>
-            <tr className="border-b border-tac-border/50">
-              <td className="py-2">Carrier spend</td>
-              <td className="text-right px-3">{formatCurrency(current.carrierSpend)}</td>
-              <td className="text-right px-3">{formatCurrency(proposed.carrierSpend)}</td>
-            </tr>
-            <tr>
-              <td className="py-2 font-semibold">Net shipping profit</td>
-              <td className="text-right px-3 font-semibold">{formatCurrency(current.netShippingProfit)}</td>
-              <td className="text-right px-3 font-semibold">{formatCurrency(proposed.netShippingProfit)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <ThresholdSweepChart
+        sweep={analysis.thresholdSweep}
+        optimalThreshold={analysis.optimalThreshold}
+        optimalNet={analysis.optimalNet}
+        currentThreshold={currentStdThreshold}
+        proposedThreshold={proposedStdThreshold}
+      />
 
-      {/* Tier mix shift */}
-      <div className="card">
-        <h3 className="text-lg font-semibold mb-4 text-tac-accent">Carrier mix shift</h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={mixData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2D4050" />
-            <XAxis dataKey="tier" tick={{ fontSize: 12, fill: "#A0AEB8" }} />
-            <YAxis tick={{ fontSize: 11, fill: "#A0AEB8" }} />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#1F3040",
-                border: "1px solid #2D4050",
-                borderRadius: 8,
-                color: "#fff",
-              }}
-            />
-            <Legend />
-            <Bar dataKey="Current" fill="#A0AEB8" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="Proposed" fill="#F5B36B" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      {benchmark.cogsContext && (
-        <div className="card">
-          <h3 className="text-lg font-semibold mb-2 text-tac-accent">Full-margin context</h3>
-          <p className="text-sm text-tac-muted">
-            Gross product margin at {formatPercent(benchmark.cogsContext.cogsPercent)} COGS:{" "}
-            {formatCurrency(benchmark.cogsContext.grossProductMargin)}. This is identical in both
-            scenarios — cart sizes don&apos;t change — so it does not affect the profit delta above.
-          </p>
-        </div>
-      )}
+      <Findings analysis={analysis} monthlyOrders={monthlyOrders} />
     </div>
   );
 }

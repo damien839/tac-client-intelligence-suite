@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Nav from "@/components/shared/Nav";
 import { parseShippingOrders } from "@/lib/shipping-sim/parse";
-import { simulate } from "@/lib/shipping-sim/model";
+import { analyze } from "@/lib/shipping-sim/analysis";
 import {
   CanonicalTier,
   OrderRow,
@@ -37,6 +37,7 @@ export default function ShippingSimulatorWizard() {
   const [currentTiers, setCurrentTiers] = useState<Partial<Record<CanonicalTier, { fee: number; freeThreshold: number | null }>>>({});
   const [proposedTiers, setProposedTiers] = useState<Partial<Record<CanonicalTier, { fee: number; freeThreshold: number | null }>>>({});
   const [cogsPercent, setCogsPercent] = useState<number | undefined>(undefined);
+  const [monthlyOrders, setMonthlyOrders] = useState<number | undefined>(undefined);
 
   function handleUpload(csvText: string) {
     const r = parseShippingOrders(csvText);
@@ -87,9 +88,9 @@ export default function ShippingSimulatorWizard() {
     [usedTiers, avgCosts]
   );
 
-  const benchmark = useMemo(() => {
+  const analysis = useMemo(() => {
     if (step < 3 || taggedOrders.length === 0 || usedTiers.length === 0) return null;
-    return simulate(taggedOrders, buildScheme(currentTiers), buildScheme(proposedTiers), cogsPercent);
+    return analyze(taggedOrders, buildScheme(currentTiers), buildScheme(proposedTiers), { cogsPercent });
   }, [step, taggedOrders, usedTiers, buildScheme, currentTiers, proposedTiers, cogsPercent]);
 
   // Seed any unconfigured current-scheme tiers with defaults when the user reaches
@@ -189,11 +190,15 @@ export default function ShippingSimulatorWizard() {
             usedTiers={usedTiers}
             tierVals={proposedTiers}
             cogsPercent={cogsPercent}
-            benchmark={benchmark}
+            monthlyOrders={monthlyOrders}
+            analysis={analysis}
+            currentScheme={buildScheme(currentTiers)}
+            proposedScheme={buildScheme(proposedTiers)}
             onChange={(tier, patch) =>
               setProposedTiers((p) => ({ ...p, [tier]: { fee: 0, freeThreshold: null, ...p[tier], ...patch } }))
             }
             onCogsChange={setCogsPercent}
+            onMonthlyOrdersChange={setMonthlyOrders}
           />
         )}
 
