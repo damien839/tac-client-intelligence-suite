@@ -9,8 +9,9 @@ interface ReconciliationBadgeProps {
 
 export default function ReconciliationBadge({ reconciliation }: ReconciliationBadgeProps) {
   const high = reconciliation.variancePct > 0.1;
-  const overshoot = reconciliation.variancePct > 1;
-  const text = overshoot
+  // Direction matters: when the model OVER-estimates, "reproduces X%" reads wrong.
+  const over = reconciliation.modelledCurrentRevenue > reconciliation.actualShippingPaid;
+  const text = over
     ? `Current-scheme model is ${formatPercent(reconciliation.variancePct)} above actual shipping revenue`
     : `Current-scheme model reproduces ${formatPercent(1 - reconciliation.variancePct)} of actual shipping revenue`;
 

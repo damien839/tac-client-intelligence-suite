@@ -1,7 +1,6 @@
 "use client";
 
-import { TierEconomics } from "@/lib/shipping-sim/types";
-import { TIER_LABELS } from "@/lib/shipping-sim/types";
+import { TierEconomics, TIER_LABELS } from "@/lib/shipping-sim/types";
 import { formatCurrency, formatPercent } from "@/lib/calculations";
 
 interface TierEconomicsTableProps {

@@ -42,7 +42,7 @@ export default function RecoveryGauges({ current, proposed }: RecoveryGaugesProp
       <Gauge label="Current" rate={current} color="#A0AEB8" />
       <Gauge label="Proposed" rate={proposed} color="#F5B36B" />
       <p className="text-xs text-tac-muted mt-3">
-        White line = 100% break-even (fees fully cover carrier cost).{" "}
+        Marker line = 100% break-even (fees fully cover carrier cost).{" "}
         {proposed < 1
           ? `Proposed still recovers only ${formatPercent(proposed, 0)} — shipping remains a subsidised AOV lever.`
           : "Proposed clears break-even."}

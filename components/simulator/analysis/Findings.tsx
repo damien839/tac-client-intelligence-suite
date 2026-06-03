@@ -2,7 +2,7 @@
 
 import { Analysis } from "@/lib/shipping-sim/types";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/calculations";
-import { signedCurrency } from "./format";
+import { carrierSpendSummary, signedCurrency } from "./format";
 
 interface FindingsProps {
   analysis: Analysis;
@@ -28,10 +28,12 @@ export default function Findings({ analysis, monthlyOrders }: FindingsProps) {
   const baseNet = Math.abs(benchmark.current.netShippingProfit);
   const improvePct = baseNet > 0 ? Math.abs(benchmark.netProfitDelta) / baseNet : 0;
   const n = movement.length;
+  const impactPositive = netDeltaPerOrder >= 0;
+  const impactClass = impactPositive ? "text-tac-success" : "text-tac-danger";
 
   const findings: string[] = [
-    `${adopt ? "Adopt the proposed scheme." : "Hold — the proposal reduces shipping profit."} Net shipping P&L moves ${signedCurrency(benchmark.netProfitDelta)} across ${n} orders (${formatPercent(improvePct)} ${adopt ? "improvement" : "worse"}), mostly from ${formatCurrency(-benchmark.carrierSpendDelta)} of carrier savings as ${movedCount} express order${movedCount === 1 ? "" : "s"} shift to standard.`,
-    `Cost recovery climbs ${formatPercent(recoveryCurrent, 0)} → ${formatPercent(recoveryProposed, 0)}. You ${recoveryProposed < 1 ? "still under-recover" : "now cover"} carrier cost at the proposed rates.`,
+    `${adopt ? "Adopt the proposed scheme." : "Hold — the proposal reduces shipping profit."} Net shipping P&L moves ${signedCurrency(benchmark.netProfitDelta)} across ${n} orders (${formatPercent(improvePct)} ${adopt ? "improvement" : "worse"}), mostly from ${carrierSpendSummary(benchmark.carrierSpendDelta)} as ${movedCount} order${movedCount === 1 ? "" : "s"} change tier.`,
+    `Cost recovery ${recoveryProposed >= recoveryCurrent ? "climbs" : "falls"} ${formatPercent(recoveryCurrent, 0)} → ${formatPercent(recoveryProposed, 0)}. You ${recoveryProposed < 1 ? "still under-recover" : "now cover"} carrier cost at the proposed rates.`,
     `Free-shipping subsidy: ${formatCurrency(subsidyCurrent)} → ${formatCurrency(subsidyProposed)}. ${freeOrdersCurrent} of ${n} orders ship free today, costing carrier fees you collect nothing against.`,
     `Profit-maximising standard threshold ≈ $${optimalThreshold}, peaking at ${formatCurrency(optimalNet)} net shipping profit.${benchmark.proposed.netShippingProfit < 0 ? " Even at the optimum, shipping runs at a managed loss — a deliberate AOV/conversion lever, not a profit centre." : ""}`,
   ];
@@ -58,19 +60,19 @@ export default function Findings({ analysis, monthlyOrders }: FindingsProps) {
           <span className="text-xs font-normal text-tac-muted">(illustrative)</span>
         </h3>
         <p className="text-sm mb-1">
-          Net shipping P&amp;L improvement per order:{" "}
-          <strong className="text-tac-success">{signedCurrency(netDeltaPerOrder)}</strong> (
+          Net shipping P&amp;L {impactPositive ? "improvement" : "change"} per order:{" "}
+          <strong className={impactClass}>{signedCurrency(netDeltaPerOrder)}</strong> (
           {signedCurrency(benchmark.netProfitDelta)} ÷ {n} orders).
         </p>
         {monthlyOrders && monthlyOrders > 0 ? (
           <p className="text-sm text-tac-muted">
             At <strong className="text-tac-text">{formatNumber(monthlyOrders)}</strong> orders/month
             that scales to ≈{" "}
-            <strong className="text-tac-success">
+            <strong className={impactClass}>
               {formatCurrency(netDeltaPerOrder * monthlyOrders, 0)}/month
             </strong>{" "}
             ·{" "}
-            <strong className="text-tac-success">
+            <strong className={impactClass}>
               {formatCurrency(netDeltaPerOrder * monthlyOrders * 12, 0)}/year
             </strong>
             . Volume is your input; the sample mix is assumed representative.

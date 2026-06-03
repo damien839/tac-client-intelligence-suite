@@ -2,8 +2,8 @@
 
 import MetricCard from "@/components/shared/MetricCard";
 import { Analysis } from "@/lib/shipping-sim/types";
-import { formatCurrency, formatPercent } from "@/lib/calculations";
-import { goodIfNegative, goodIfPositive, signedCurrency } from "./format";
+import { formatPercent } from "@/lib/calculations";
+import { carrierSpendSummary, goodIfNegative, goodIfPositive, signedCurrency } from "./format";
 
 interface VerdictHeaderProps {
   analysis: Analysis;
@@ -33,8 +33,8 @@ export default function VerdictHeader({ analysis }: VerdictHeaderProps) {
           </strong>{" "}
           Net shipping P&amp;L moves {signedCurrency(benchmark.netProfitDelta)} across{" "}
           {movement.length} orders ({formatPercent(improvePct)} {adopt ? "improvement" : "worse"}),
-          driven mostly by carrier savings of {formatCurrency(-benchmark.carrierSpendDelta)} as{" "}
-          {movedCount} express order{movedCount === 1 ? "" : "s"} shift to standard.
+          driven mostly by {carrierSpendSummary(benchmark.carrierSpendDelta)} as{" "}
+          {movedCount} order{movedCount === 1 ? "" : "s"} change tier.
         </p>
       </div>
 
@@ -55,7 +55,7 @@ export default function VerdictHeader({ analysis }: VerdictHeaderProps) {
           label="Carrier spend"
           value={signedCurrency(benchmark.carrierSpendDelta)}
           trend={goodIfNegative(benchmark.carrierSpendDelta)}
-          trendValue="lower outlay"
+          trendValue={benchmark.carrierSpendDelta <= 0 ? "lower outlay" : "higher outlay"}
         />
         <MetricCard
           label="Orders reshuffled"

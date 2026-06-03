@@ -50,7 +50,7 @@ export default function ThresholdSweepChart({
             tick={{ fontSize: 11, fill: "#A0AEB8" }}
             tickFormatter={(v) => `$${v}`}
           />
-          <YAxis tick={{ fontSize: 11, fill: "#A0AEB8" }} tickFormatter={(v) => `$${v}`} />
+          <YAxis tick={{ fontSize: 11, fill: "#A0AEB8" }} tickFormatter={(v) => formatCurrency(Number(v), 0)} />
           <Tooltip
             contentStyle={TOOLTIP_STYLE}
             formatter={(v) => [formatCurrency(Number(v)), "Net shipping profit"]}

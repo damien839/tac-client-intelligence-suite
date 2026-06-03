@@ -16,3 +16,10 @@ export function goodIfPositive(delta: number): Trend {
 export function goodIfNegative(delta: number): Trend {
   return delta < 0 ? "up" : delta > 0 ? "down" : "neutral";
 }
+
+/** Direction-aware phrase for a carrier-spend delta (negative = saving). */
+export function carrierSpendSummary(delta: number): string {
+  return delta < 0
+    ? `carrier savings of ${formatCurrency(-delta)}`
+    : `a carrier cost rise of ${formatCurrency(delta)}`;
+}
