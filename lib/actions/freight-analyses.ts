@@ -26,6 +26,9 @@ export async function saveAnalysis(input: {
   tokens_output?: number;
   duration_ms?: number;
   notes?: string;
+  parent_analysis_id?: string;
+  brief_changes?: unknown;
+  rerun_rationale?: string;
 }): Promise<FreightAnalysisRecord> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
@@ -40,6 +43,9 @@ export async function saveAnalysis(input: {
       tokens_output: input.tokens_output ?? null,
       duration_ms: input.duration_ms ?? null,
       notes: input.notes ?? null,
+      parent_analysis_id: input.parent_analysis_id ?? null,
+      brief_changes: input.brief_changes ?? null,
+      rerun_rationale: input.rerun_rationale ?? null,
     })
     .select()
     .single();
@@ -58,6 +64,12 @@ export async function getAnalysis(id: string): Promise<FreightAnalysisRecord | n
 
   if (error) throw new Error(`getAnalysis: ${error.message}`);
   return (data as FreightAnalysisRecord | null) ?? null;
+}
+
+export async function deleteAnalysis(id: string): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from("freight_analyses").delete().eq("id", id);
+  if (error) throw new Error(`deleteAnalysis: ${error.message}`);
 }
 
 export async function listAnalysesForTenant(
