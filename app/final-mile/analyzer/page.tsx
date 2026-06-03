@@ -2,7 +2,9 @@
 
 import Nav from "@/components/shared/Nav";
 import { useTenant } from "@/lib/tenant-context";
-import AnalyzerChat from "@/components/final-mile/AnalyzerChat";
+import AnalyzerIntake from "@/components/final-mile/AnalyzerIntake";
+import PastAnalysesList from "@/components/final-mile/PastAnalysesList";
+import UnmappedTiersBanner from "@/components/final-mile/UnmappedTiersBanner";
 
 export default function AnalyzerPage() {
   const { activeTenant } = useTenant();
@@ -38,7 +40,11 @@ export default function AnalyzerPage() {
             </p>
           </div>
         ) : (
-          <AnalyzerChat tenantId={activeTenant.id} />
+          <div className="space-y-6">
+            <UnmappedTiersBanner tenantId={activeTenant.id} />
+            <PastAnalysesList tenantId={activeTenant.id} />
+            <AnalyzerIntake tenantId={activeTenant.id} />
+          </div>
         )}
       </main>
     </>

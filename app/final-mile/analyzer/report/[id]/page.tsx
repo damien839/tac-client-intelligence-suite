@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Nav from "@/components/shared/Nav";
 import { getAnalysis } from "@/lib/actions/freight-analyses";
 import ReportRenderer from "@/components/final-mile/report/ReportRenderer";
+import ReportChatWidget from "@/components/final-mile/report/ReportChatWidget";
 import type { AnalyzerReport } from "@/lib/analyzer/report-types";
 
 interface ReportPageProps {
@@ -24,6 +25,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
         generatedAt={record.created_at}
         analysisId={record.id}
       />
+      <ReportChatWidget analysisId={record.id} baseBrief={report.brief} />
     </>
   );
 }
