@@ -8,6 +8,8 @@ import type {
 } from "@/lib/db/types";
 import type { ShipmentVolumeInput } from "@/lib/actions/shipment-volumes";
 import { SERVICE_LEVEL_OPTIONS } from "@/lib/constants/service-levels";
+import ThinkingIndicator from "@/components/shared/ThinkingIndicator";
+import PostcodeBreakdownPanel from "@/components/final-mile/PostcodeBreakdownPanel";
 
 interface Props {
   tenantId: string | null;
@@ -43,6 +45,12 @@ export default function BillingTab({ tenantId }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [parsing, setParsing] = useState<"local" | "ai" | null>(null);
+  const [extractWarnings, setExtractWarnings] = useState<string[]>([]);
+  const [missingFields, setMissingFields] = useState<string[]>([]);
+  // Bumped after a successful billing extract that wrote lines, so the
+  // postcode breakdown panel re-fetches without manual refresh.
+  const [linesRefreshKey, setLinesRefreshKey] = useState(0);
 
   const matchCarrier = useCallback(
     (raw: string, list: Carrier[]): Carrier | null => {
@@ -93,26 +101,132 @@ export default function BillingTab({ tenantId }: Props) {
     refreshVolumes(tenantId);
   }, [tenantId, refreshVolumes]);
 
-  const handleFile = (file: File) => {
-    setParseError(null);
-    Papa.parse<Record<string, string>>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (result) => {
-        try {
-          const parsed = parseCsvRows(result.data, carriers, matchCarrier);
-          if (parsed.length === 0) {
-            setParseError("No valid rows found. Check your column headers.");
-            return;
-          }
-          setDrafts(parsed);
-        } catch (e: unknown) {
-          setParseError(e instanceof Error ? e.message : "Parse error");
+  const ingestRows = useCallback(
+    (rows: Record<string, string>[]): DraftRow[] => {
+      const parsed = parseCsvRows(rows, carriers, matchCarrier);
+      if (parsed.length > 0) {
+        setDrafts(parsed);
+      }
+      return parsed;
+    },
+    [carriers, matchCarrier]
+  );
+
+  const aiExtract = useCallback(
+    async (file: File) => {
+      setParsing("ai");
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        // Pass tenant_id so the route can persist line-level data into
+        // shipment_lines. Without it the extract still works but only
+        // returns the aggregated preview (no drill-down).
+        const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+        const res = await fetch(`/api/shipment-volumes/extract${qs}`, {
+          method: "POST",
+          body: fd,
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          throw new Error(body.error ?? `Extract failed (${res.status})`);
         }
-      },
-      error: (err) => setParseError(err.message),
-    });
-  };
+        const aiRows: AiExtractRow[] = Array.isArray(body.rows) ? body.rows : [];
+        if (aiRows.length === 0) {
+          setParseError(
+            body.warnings?.[0] ??
+              "Couldn't extract any rows from this file. Try the CSV template."
+          );
+          return;
+        }
+        const recordRows: Record<string, string>[] = aiRows.map((r) => ({
+          Carrier: r.carrier ?? "",
+          Service: r.service ?? "",
+          Zone: r.zone ?? "",
+          "Monthly Shipments":
+            r.monthly_shipments == null ? "" : String(r.monthly_shipments),
+          "Avg Charge (AUD)":
+            r.avg_charge_aud == null ? "" : String(r.avg_charge_aud),
+          "Avg Weight (kg)":
+            r.avg_weight_kg == null ? "" : String(r.avg_weight_kg),
+          Notes: r.notes ?? "",
+        }));
+        const ingested = ingestRows(recordRows);
+        if (ingested.length === 0) {
+          setParseError(
+            "Claude returned rows but none could be mapped to carriers. Check the carrier column."
+          );
+        }
+        setExtractWarnings(
+          Array.isArray(body.warnings)
+            ? body.warnings.filter(
+                (w: unknown): w is string => typeof w === "string"
+              )
+            : []
+        );
+        setMissingFields(
+          Array.isArray(body.missing_fields)
+            ? body.missing_fields.filter(
+                (m: unknown): m is string => typeof m === "string"
+              )
+            : []
+        );
+        if (typeof body.period_label === "string" && !periodLabel.trim()) {
+          setPeriodLabel(body.period_label);
+        }
+        // If the extract wrote lines, refresh the breakdown panel.
+        if (body.persisted && body.persisted.lines_written > 0) {
+          setLinesRefreshKey((k) => k + 1);
+        }
+      } catch (e: unknown) {
+        setParseError(e instanceof Error ? e.message : "Extract error");
+      } finally {
+        setParsing(null);
+      }
+    },
+    [ingestRows, periodLabel, tenantId]
+  );
+
+  const handleFile = useCallback(
+    async (file: File) => {
+      setParseError(null);
+      setExtractWarnings([]);
+      setMissingFields([]);
+      setParsing("local");
+
+      const name = file.name.toLowerCase();
+      const isExcel =
+        name.endsWith(".xlsx") ||
+        name.endsWith(".xls") ||
+        file.type ===
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+        file.type === "application/vnd.ms-excel";
+      const isPdfOrImage =
+        file.type === "application/pdf" ||
+        name.endsWith(".pdf") ||
+        file.type.startsWith("image/");
+
+      if (isPdfOrImage) {
+        await aiExtract(file);
+        return;
+      }
+
+      try {
+        const rows = isExcel
+          ? await parseExcelFile(file)
+          : await parseCsvFile(file);
+        const ingested = ingestRows(rows);
+        if (ingested.length === 0) {
+          await aiExtract(file);
+          return;
+        }
+        setParsing(null);
+      } catch (e: unknown) {
+        setParseError(e instanceof Error ? e.message : "Parse error");
+        setParsing(null);
+      }
+    },
+    [aiExtract, ingestRows]
+  );
 
   const updateDraft = (i: number, patch: Partial<DraftRow>) => {
     setDrafts((d) => d.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
@@ -219,7 +333,12 @@ export default function BillingTab({ tenantId }: Props) {
           <div>
             <h2 className="text-xl font-semibold mb-1">Upload Current Volume + Charges</h2>
             <p className="text-sm text-tac-muted">
-              CSV columns:{" "}
+              Upload a CSV, Excel, PDF, or image. We&apos;ll try the canonical
+              template first and fall back to Claude for vendor invoices and
+              billing exports.
+            </p>
+            <p className="text-xs text-tac-muted mt-1">
+              Template columns:{" "}
               <code className="text-xs bg-tac-bg-light px-1.5 py-0.5 rounded">
                 Carrier, Service, Zone, Monthly Shipments, Avg Charge (AUD), Avg Weight (kg), Notes
               </code>
@@ -236,16 +355,19 @@ export default function BillingTab({ tenantId }: Props) {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="block">
-            <span className="text-xs text-tac-muted block mb-1">CSV file</span>
+            <span className="text-xs text-tac-muted block mb-1">
+              CSV / Excel / PDF / image
+            </span>
             <input
               type="file"
-              accept=".csv,text/csv"
+              accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,.pdf,application/pdf,image/png,image/jpeg,image/webp,image/gif"
+              disabled={parsing !== null}
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f) handleFile(f);
+                if (f) void handleFile(f);
                 e.target.value = "";
               }}
-              className="block w-full text-sm text-tac-text file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-tac-accent file:text-tac-bg hover:file:bg-tac-accent/90"
+              className="block w-full text-sm text-tac-text file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-tac-accent file:text-tac-bg hover:file:bg-tac-accent/90 disabled:opacity-50"
             />
           </label>
           <label className="block">
@@ -260,7 +382,34 @@ export default function BillingTab({ tenantId }: Props) {
           </label>
         </div>
 
+        {parsing && (
+          <div className="mt-3">
+            <ThinkingIndicator
+              kind={parsing === "ai" ? "extract" : "upload"}
+            />
+          </div>
+        )}
+
         {parseError && <p className="text-sm text-tac-danger mt-3">{parseError}</p>}
+
+        {(extractWarnings.length > 0 || missingFields.length > 0) && (
+          <div className="mt-3 rounded border border-tac-warning/40 bg-tac-warning/5 px-3 py-2 text-xs space-y-1">
+            {missingFields.length > 0 && (
+              <div className="text-tac-warning">
+                <span className="font-medium">Missing for analysis:</span>{" "}
+                {missingFields.map(formatMissingField).join(", ")}
+                <span className="text-tac-muted">
+                  {" "}— add these in the table below or re-upload a richer file.
+                </span>
+              </div>
+            )}
+            {extractWarnings.map((w, i) => (
+              <div key={i} className="text-tac-muted">
+                · {w}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {drafts.length > 0 && (
@@ -349,7 +498,7 @@ export default function BillingTab({ tenantId }: Props) {
                         ))}
                         {d.service_level &&
                           !(SERVICE_LEVEL_OPTIONS as readonly string[]).includes(d.service_level) && (
-                            <option value="__custom__">{d.service_level} (csv)</option>
+                            <option value="__custom__">{d.service_level}</option>
                           )}
                       </select>
                     </td>
@@ -526,8 +675,71 @@ export default function BillingTab({ tenantId }: Props) {
           </div>
         )}
       </div>
+
+      <PostcodeBreakdownPanel
+        tenantId={tenantId}
+        carriers={carriers}
+        refreshKey={linesRefreshKey}
+      />
     </div>
   );
+}
+
+interface AiExtractRow {
+  carrier: string;
+  service: string;
+  zone: string;
+  monthly_shipments: number | null;
+  avg_charge_aud: number | null;
+  avg_weight_kg: number | null;
+  notes: string | null;
+}
+
+const MISSING_FIELD_LABELS: Record<string, string> = {
+  carrier: "carrier",
+  service: "service level",
+  zone: "zone",
+  monthly_shipments: "monthly shipments",
+  avg_charge_aud: "avg charge (AUD)",
+  avg_weight_kg: "avg weight (kg)",
+  period_label: "period label",
+};
+
+function formatMissingField(field: string): string {
+  return MISSING_FIELD_LABELS[field] ?? field;
+}
+
+function parseCsvFile(file: File): Promise<Record<string, string>[]> {
+  return new Promise((resolve, reject) => {
+    Papa.parse<Record<string, string>>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (result) => resolve(result.data),
+      error: (err) => reject(err),
+    });
+  });
+}
+
+async function parseExcelFile(file: File): Promise<Record<string, string>[]> {
+  const XLSX = await import("xlsx");
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+  const sheetName = wb.SheetNames[0];
+  if (!sheetName) return [];
+  const sheet = wb.Sheets[sheetName];
+  if (!sheet) return [];
+  const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    defval: "",
+    raw: false,
+    blankrows: false,
+  });
+  return json.map((row) => {
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(row)) {
+      out[key] = value == null ? "" : String(value);
+    }
+    return out;
+  });
 }
 
 function parseCsvRows(

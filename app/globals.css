@@ -25,13 +25,26 @@
     @apply border border-tac-accent text-tac-accent font-semibold px-6 py-2.5 rounded-lg hover:bg-tac-accent hover:text-tac-bg transition-colors duration-200;
   }
   .card {
-    @apply bg-tac-bg-card border border-tac-border rounded-xl p-6;
+    @apply bg-tac-bg-card border border-tac-border rounded-xl p-6 shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset,0_8px_24px_-12px_rgba(0,0,0,0.55)];
+  }
+  .card-elevated {
+    @apply card bg-gradient-to-b from-tac-bg-card to-[#1B2A38];
+  }
+  .card-interactive {
+    @apply card transition-colors hover:border-tac-accent/40;
   }
   .input-field {
     @apply bg-tac-bg border border-tac-border rounded-lg px-4 py-2.5 text-tac-text placeholder-tac-muted focus:outline-none focus:border-tac-accent focus:ring-1 focus:ring-tac-accent transition-colors w-full;
   }
   .label-text {
     @apply text-sm font-medium text-tac-muted mb-1 block;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum", "lnum";
+  }
+  .section-rule {
+    @apply h-[2px] w-10 rounded-full bg-tac-accent/70 mb-3;
   }
 }
 
