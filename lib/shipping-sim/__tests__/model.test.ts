@@ -117,4 +117,26 @@ describe("simulate", () => {
     expect(b.current.shippingRevenue).toBe(0);
     expect(b.reconciliation.variancePct).toBe(0);
   });
+
+  it("all-free scheme (threshold 0) collects zero shipping revenue", () => {
+    const allFree: Scheme = {
+      standard: { tier: "standard", fee: 10, freeThreshold: 0, avgCost: 7 },
+      express: { tier: "express", fee: 15, freeThreshold: 0, avgCost: 12 },
+    };
+    const orders: TaggedOrder[] = [order(80, "standard"), order(150, "express")];
+    const r = simulate(orders, allFree, allFree, undefined);
+    expect(r.current.shippingRevenue).toBe(0);
+    expect(r.current.carrierSpend).toBe(19); // 7 + 12
+    expect(r.shippingRevenueDelta).toBe(0);
+  });
+
+  it("all-flat scheme (null threshold) always charges the fee regardless of cart value", () => {
+    const allFlat: Scheme = {
+      standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 },
+      express: { tier: "express", fee: 15, freeThreshold: null, avgCost: 12 },
+    };
+    const orders: TaggedOrder[] = [order(500, "standard"), order(500, "express")];
+    const r = simulate(orders, allFlat, allFlat, undefined);
+    expect(r.current.shippingRevenue).toBe(25); // 10 + 15, even at $500 cart
+  });
 });

@@ -30,6 +30,16 @@ export default function BenchmarkPanel({ benchmark }: BenchmarkPanelProps) {
   }));
 
   const reconHigh = reconciliation.variancePct > 0.1;
+  const reconOvershoot = reconciliation.variancePct > 1;
+  const reconText = reconOvershoot
+    ? `Current-scheme model is ${formatPercent(reconciliation.variancePct)} above actual shipping revenue`
+    : `Current-scheme model reproduces ${formatPercent(1 - reconciliation.variancePct)} of actual shipping revenue`;
+
+  // Revenue & profit: a positive delta is good. Carrier spend: a negative (lower) delta is good.
+  const goodIfPositive = (d: number): "up" | "down" | "neutral" =>
+    d > 0 ? "up" : d < 0 ? "down" : "neutral";
+  const goodIfNegative = (d: number): "up" | "down" | "neutral" =>
+    d < 0 ? "up" : d > 0 ? "down" : "neutral";
 
   return (
     <div className="space-y-6">
@@ -41,8 +51,7 @@ export default function BenchmarkPanel({ benchmark }: BenchmarkPanelProps) {
             : "bg-tac-success/10 border-tac-success/30 text-tac-success"
         }`}
       >
-        Current-scheme model reproduces {formatPercent(Math.max(0, 1 - reconciliation.variancePct))} of actual
-        shipping revenue ({formatCurrency(reconciliation.modelledCurrentRevenue)} modelled vs{" "}
+        {reconText} ({formatCurrency(reconciliation.modelledCurrentRevenue)} modelled vs{" "}
         {formatCurrency(reconciliation.actualShippingPaid)} actual).
         {reconHigh && " High variance — re-check the current scheme before trusting the proposal."}
       </div>
@@ -52,9 +61,22 @@ export default function BenchmarkPanel({ benchmark }: BenchmarkPanelProps) {
         <MetricCard
           label="Δ Shipping Revenue"
           value={formatCurrency(benchmark.shippingRevenueDelta)}
+          trend={goodIfPositive(benchmark.shippingRevenueDelta)}
+          trendValue="vs current"
         />
-        <MetricCard label="Δ Carrier Spend" value={formatCurrency(benchmark.carrierSpendDelta)} />
-        <MetricCard label="Net Profit Δ" value={formatCurrency(benchmark.netProfitDelta)} accent />
+        <MetricCard
+          label="Δ Carrier Spend"
+          value={formatCurrency(benchmark.carrierSpendDelta)}
+          trend={goodIfNegative(benchmark.carrierSpendDelta)}
+          trendValue="vs current"
+        />
+        <MetricCard
+          label="Net Profit Δ"
+          value={formatCurrency(benchmark.netProfitDelta)}
+          trend={goodIfPositive(benchmark.netProfitDelta)}
+          trendValue="vs current"
+          accent
+        />
       </div>
 
       {/* Current vs proposed table */}

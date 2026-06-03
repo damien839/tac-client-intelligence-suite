@@ -92,6 +92,21 @@ export default function ShippingSimulatorWizard() {
     return simulate(taggedOrders, buildScheme(currentTiers), buildScheme(proposedTiers), cogsPercent);
   }, [step, taggedOrders, usedTiers, buildScheme, currentTiers, proposedTiers, cogsPercent]);
 
+  // Seed any unconfigured current-scheme tiers with defaults when the user reaches
+  // step 2, so a merchant whose real scheme matches the defaults can proceed without
+  // touching every control. The reconciliation badge still flags it if the defaults
+  // don't match their actual shipping revenue.
+  useEffect(() => {
+    if (step !== 2) return;
+    setCurrentTiers((prev) => {
+      const missing = usedTiers.filter((t) => prev[t] === undefined);
+      if (missing.length === 0) return prev;
+      const next = { ...prev };
+      for (const t of missing) next[t] = { fee: 0, freeThreshold: null };
+      return next;
+    });
+  }, [step, usedTiers]);
+
   // Re-seed proposed tiers from current on each forward transition into step 3,
   // so the proposal always starts from the latest current scheme — even if the user
   // went Back and edited the current state after a previous visit.
@@ -108,6 +123,7 @@ export default function ShippingSimulatorWizard() {
     if (step === 0) return orders.length > 0 && parseErrors.length === 0;
     if (step === 1)
       return (
+        usedTiers.length > 0 &&
         services.every((s) => serviceMap[s] !== undefined) &&
         usedTiers.every((t) => avgCosts[t] !== undefined && (avgCosts[t] ?? 0) >= 0)
       );

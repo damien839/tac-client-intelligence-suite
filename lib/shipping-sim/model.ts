@@ -1,5 +1,5 @@
 import { cheapestTier, tierCost } from "./tiers";
-import { CanonicalTier, ScenarioResult, Scheme, TaggedOrder } from "./types";
+import { Benchmark, CanonicalTier, ScenarioResult, Scheme, TaggedOrder } from "./types";
 
 /**
  * Speed premium the customer revealed under the current scheme:
@@ -91,7 +91,7 @@ export function simulate(
   current: Scheme,
   proposed: Scheme,
   cogsPercent?: number
-) {
+): Benchmark {
   const currentResult = currentScenario(orders, current);
   const proposedResult = proposedScenario(orders, current, proposed);
 
