@@ -64,3 +64,45 @@ export interface Benchmark {
   reconciliation: Reconciliation;
   cogsContext?: CogsContext;
 }
+
+export interface TierEconomics {
+  tier: CanonicalTier;
+  count: number;
+  feeRevenue: number;
+  carrierCost: number;
+  net: number; // feeRevenue - carrierCost
+  recoveryRate: number; // feeRevenue / carrierCost (0 when carrierCost is 0)
+}
+
+export interface OrderMovement {
+  gross: number;
+  chosenTier: CanonicalTier;
+  chosenFee: number;
+  landedTier: CanonicalTier;
+  landedFee: number;
+  moved: boolean;
+  netDelta: number; // (landedFee - landedCarrier) - (chosenFee - chosenCarrier)
+}
+
+export interface ThresholdSweepPoint {
+  threshold: number;
+  netShippingProfit: number;
+}
+
+export interface Analysis {
+  benchmark: Benchmark;
+  recoveryCurrent: number;
+  recoveryProposed: number;
+  subsidyCurrent: number;
+  subsidyProposed: number;
+  freeOrdersCurrent: number;
+  freeOrdersProposed: number;
+  tierEconomicsCurrent: TierEconomics[];
+  tierEconomicsProposed: TierEconomics[];
+  movement: OrderMovement[];
+  movedCount: number;
+  thresholdSweep: ThresholdSweepPoint[];
+  optimalThreshold: number;
+  optimalNet: number;
+  netDeltaPerOrder: number;
+}
