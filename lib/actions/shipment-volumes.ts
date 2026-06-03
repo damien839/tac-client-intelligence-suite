@@ -2,6 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  lookupCanonicalTier,
+  resolveCanonicalTiers,
+} from "@/lib/freight/canonical-tier-server";
 import type {
   FreightShipmentVolume,
   FreightShipmentVolumeWithCarrier,
@@ -43,11 +47,35 @@ export async function createShipmentVolumes(
 ): Promise<FreightShipmentVolume[]> {
   if (rows.length === 0) return [];
 
+  // Resolve canonical_tier per (tenant × carrier) batch so we make one
+  // round-trip per group instead of per row.
+  const groups = new Map<string, ShipmentVolumeInput[]>();
+  for (const r of rows) {
+    const key = `${r.tenant_id}|${r.carrier_id}`;
+    const list = groups.get(key) ?? [];
+    list.push(r);
+    groups.set(key, list);
+  }
+
+  const canonicalByRow = new Map<ShipmentVolumeInput, string | null>();
+  for (const [key, list] of Array.from(groups.entries())) {
+    const [tenantId, carrierId] = key.split("|");
+    const resolved = await resolveCanonicalTiers({
+      tenantId,
+      carrierId,
+      rawLabels: list.map((r) => r.service_level),
+    });
+    for (const r of list) {
+      canonicalByRow.set(r, lookupCanonicalTier(resolved, r.service_level));
+    }
+  }
+
   const supabase = getSupabaseAdmin();
   const payload = rows.map((r) => ({
     tenant_id: r.tenant_id,
     carrier_id: r.carrier_id,
     service_level: r.service_level.trim(),
+    canonical_tier: canonicalByRow.get(r) ?? null,
     zone_label: r.zone_label.trim(),
     monthly_shipments: r.monthly_shipments,
     avg_charge_aud: r.avg_charge_aud,
