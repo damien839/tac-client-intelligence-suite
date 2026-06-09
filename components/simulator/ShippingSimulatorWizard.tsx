@@ -134,12 +134,14 @@ export default function ShippingSimulatorWizard() {
 
   return (
     <>
-      <Nav />
+      <div className="no-print">
+        <Nav />
+      </div>
       <main className="max-w-7xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-2">Shipping Strategy Simulator</h1>
+        <h1 className="text-3xl font-bold mb-2 no-print">Shipping Strategy Simulator</h1>
 
         {/* Step indicator */}
-        <div className="flex gap-2 mb-8">
+        <div className="flex gap-2 mb-8 no-print">
           {STEPS.map((label, i) => (
             <div
               key={label}
@@ -203,7 +205,7 @@ export default function ShippingSimulatorWizard() {
         )}
 
         {/* Nav buttons */}
-        <div className="flex justify-between mt-8">
+        <div className="flex justify-between mt-8 no-print">
           <button
             className="btn-secondary"
             disabled={step === 0}
