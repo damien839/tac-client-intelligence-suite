@@ -29,7 +29,7 @@ export default function AovDistribution({ movement, markers }: AovDistributionPr
   return (
     <div className="card">
       <h3 className="text-lg font-semibold mb-4 text-tac-accent">Where orders sit vs your thresholds</h3>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Order cart values vs thresholds">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Order cart values vs thresholds" className="text-tac-text">
         {markers.map((m, i) => (
           <g key={i}>
             <line
@@ -48,15 +48,15 @@ export default function AovDistribution({ movement, markers }: AovDistributionPr
 
         <line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="#2D4050" />
         {[0, 100, 200, 300].filter((g) => g <= maxGross).map((g) => (
-          <text key={g} x={x(g)} y={H - padB + 14} textAnchor="middle" fontSize="9" fill="#A0AEB8">
+          <text key={g} x={x(g)} y={H - padB + 14} textAnchor="middle" fontSize="9" fill="currentColor">
             ${g}
           </text>
         ))}
 
-        <text x={padL} y={H - padB - 30} fontSize="9" fill="#6088aa">
+        <text x={padL} y={H - padB - 30} fontSize="9" fill="currentColor">
           Express
         </text>
-        <text x={padL} y={H - padB - 8} fontSize="9" fill="#A0AEB8">
+        <text x={padL} y={H - padB - 8} fontSize="9" fill="currentColor">
           Standard
         </text>
 

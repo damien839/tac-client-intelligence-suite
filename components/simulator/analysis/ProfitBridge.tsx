@@ -42,9 +42,9 @@ export default function ProfitBridge({ benchmark }: ProfitBridgeProps) {
   return (
     <div className="card">
       <h3 className="text-lg font-semibold mb-4 text-tac-accent">Profit bridge</h3>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Profit bridge waterfall">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Profit bridge waterfall" className="text-tac-text">
         <line x1={padL} y1={zeroY} x2={W - 20} y2={zeroY} stroke="#2D4050" />
-        <text x={padL - 8} y={zeroY + 4} textAnchor="end" fontSize="10" fill="#A0AEB8">
+        <text x={padL - 8} y={zeroY + 4} textAnchor="end" fontSize="10" fill="currentColor">
           $0
         </text>
         {steps.map((s, i) => {
@@ -55,10 +55,10 @@ export default function ProfitBridge({ benchmark }: ProfitBridgeProps) {
           return (
             <g key={s.label}>
               <rect x={x} y={top} width={bw} height={Math.max(2, bot - top)} rx={3} fill={color} />
-              <text x={x + bw / 2} y={top - 5} textAnchor="middle" fontSize="12" fill="#E8EEF2">
+              <text x={x + bw / 2} y={top - 5} textAnchor="middle" fontSize="12" fill="currentColor">
                 {s.total ? formatCurrency(s.amount) : signedCurrency(s.amount)}
               </text>
-              <text x={x + bw / 2} y={H - 12} textAnchor="middle" fontSize="11" fill="#A0AEB8">
+              <text x={x + bw / 2} y={H - 12} textAnchor="middle" fontSize="11" fill="currentColor">
                 {s.label}
               </text>
             </g>

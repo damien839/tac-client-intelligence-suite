@@ -32,7 +32,7 @@ export default function StepProposal({
 }: StepProposalProps) {
   return (
     <div className="space-y-8">
-      <div>
+      <div className="no-print">
         <p className="text-tac-muted mb-4">
           Adjust the proposed fee and free-over threshold per service. The analysis below updates live.
         </p>
@@ -51,7 +51,7 @@ export default function StepProposal({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 no-print">
         <div className="card">
           <label className="flex items-center gap-2 cursor-pointer text-sm text-tac-text mb-3">
             <input

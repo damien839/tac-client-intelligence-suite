@@ -1,6 +1,6 @@
 "use client";
 
-import { Analysis, Scheme } from "@/lib/shipping-sim/types";
+import { Analysis, CANONICAL_TIERS, Scheme, TierConfig, TIER_LABELS } from "@/lib/shipping-sim/types";
 import VerdictHeader from "./analysis/VerdictHeader";
 import ReconciliationBadge from "./analysis/ReconciliationBadge";
 import ProfitBridge from "./analysis/ProfitBridge";
@@ -19,12 +19,32 @@ interface BenchmarkPanelProps {
   monthlyOrders?: number;
 }
 
+function describeTier(config?: TierConfig): string {
+  if (!config) return "—";
+  return config.freeThreshold === null
+    ? `$${config.fee} flat`
+    : `$${config.fee}, free over $${config.freeThreshold}`;
+}
+
+function handleExport() {
+  const previous = document.title;
+  document.title = "Shipping Strategy Analysis";
+  const restore = () => {
+    document.title = previous;
+    window.removeEventListener("afterprint", restore);
+  };
+  window.addEventListener("afterprint", restore);
+  window.print();
+}
+
 export default function BenchmarkPanel({
   analysis,
   currentScheme,
   proposedScheme,
   monthlyOrders,
 }: BenchmarkPanelProps) {
+  const tiers = CANONICAL_TIERS.filter((t) => currentScheme[t] || proposedScheme[t]);
+
   // AOV threshold markers (only tiers with a real free-over line)
   const markers: ThresholdMarker[] = [];
   const cs = currentScheme.standard;
@@ -39,8 +59,36 @@ export default function BenchmarkPanel({
   const currentStdThreshold = cs && cs.freeThreshold !== null ? cs.freeThreshold : 0;
   const proposedStdThreshold = ps && ps.freeThreshold !== null ? ps.freeThreshold : 0;
 
+  const reportDate = new Date().toLocaleDateString("en-AU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
   return (
     <div className="space-y-8">
+      {/* Export toolbar (screen only) */}
+      <div className="no-print flex items-center justify-between">
+        <p className="text-sm text-tac-muted">Live analysis — export a client-ready PDF →</p>
+        <button type="button" onClick={handleExport} className="btn-secondary">
+          ⬇ Download PDF
+        </button>
+      </div>
+
+      {/* Report header (PDF only) */}
+      <div className="hidden print:block">
+        <h1 className="text-2xl font-bold text-tac-accent">Shipping Strategy Analysis</h1>
+        <p className="text-sm text-tac-muted">The Aggregate Co · {reportDate}</p>
+        <div className="mt-3 text-sm">
+          {tiers.map((t) => (
+            <p key={t}>
+              <span className="font-semibold">{TIER_LABELS[t]}:</span> {describeTier(currentScheme[t])} →{" "}
+              {describeTier(proposedScheme[t])}
+            </p>
+          ))}
+        </div>
+      </div>
+
       <VerdictHeader analysis={analysis} />
 
       <ReconciliationBadge reconciliation={analysis.benchmark.reconciliation} />

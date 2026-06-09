@@ -18,6 +18,11 @@ export default function StepUpload({ orders, errors, warnings, onUpload }: StepU
         Upload a Shopify orders export. We need three columns: gross sale (Total), shipping paid
         (Shipping), and the service selected at checkout (Shipping Method).
       </p>
+      <div className="mb-4 p-3 rounded-lg border border-tac-accent/30 bg-tac-accent/5 text-sm text-tac-text">
+        <strong>One market at a time.</strong> Upload orders for a single country/region that shares
+        the same currency and shipping policy. Mixing currencies or markets will skew the analysis.
+        Amounts are treated as AUD.
+      </div>
       <CsvUploader
         label="Upload Shopify Orders CSV"
         description="Required: Total, Shipping, Shipping Method"
