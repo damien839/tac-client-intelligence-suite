@@ -5,6 +5,7 @@ import TierConfigRow from "../TierConfigRow";
 import InputField from "@/components/shared/InputField";
 import OptionsComparison from "../OptionsComparison";
 import ComparisonReport from "../ComparisonReport";
+import ReconciliationBadge from "../analysis/ReconciliationBadge";
 import { describeStandard } from "../analysis/format";
 import {
   OPTION_COLORS,
@@ -75,17 +76,18 @@ export default function StepProposal({
     [orders, currentScheme, proposedScheme, behavior]
   );
 
-  // Current column = deterministic observed baseline: behaviour zeroed.
+  // Current column = deterministic observed baseline: behaviour zeroed. Not gated on
+  // COGS — with uplift and abandonment at 0, cogsPercent affects nothing, and the
+  // reconciliation badge must render pre-COGS.
   const currentFacts = useMemo(
     () =>
-      behavior
-        ? evaluateScheme(orders, currentScheme, currentScheme, {
-            ...behavior,
-            upliftRate: 0,
-            abandonRate: 0,
-          })
-        : null,
-    [orders, currentScheme, behavior]
+      evaluateScheme(orders, currentScheme, currentScheme, {
+        cogsPercent: deferredCogs ?? 0,
+        upliftRate: 0,
+        upliftWindow: 20,
+        abandonRate: 0,
+      }),
+    [orders, currentScheme, deferredCogs]
   );
 
   // The same valid-order set the engine evaluates — drives reconciliation + AOV strip.
@@ -241,6 +243,9 @@ export default function StepProposal({
           )}
         </div>
       </div>
+
+      {/* Pre-COGS, the option data doesn't exist yet but the reconciliation check does. */}
+      {!behavior && reconciliation && <ReconciliationBadge reconciliation={reconciliation} />}
 
       {behavior && recs && currentFacts && reconciliation && (
         <ComparisonReport

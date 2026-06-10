@@ -75,15 +75,6 @@ export function prepareBuckets(buckets: OrderBucket[], current: Scheme): Prepare
  * 3. Abandonment: of the remaining weight, worse-off orders (landed fee above
  *    current fee) abandon with weight abandonRate — lose product margin.
  * 4. The rest pay the landed fee.
- */
-/**
- * Expected-value outcome of one candidate scheme. Per bucket:
- * 1. Land via revealed-WTP (same rule as landedTier, using the cached premium).
- * 2. Basket-building: in-window paying orders build to the threshold with
- *    weight upliftRate — ship free, carrier cost unchanged, gain product margin.
- * 3. Abandonment: of the remaining weight, worse-off orders (landed fee above
- *    current fee) abandon with weight abandonRate — lose product margin.
- * 4. The rest pay the landed fee.
  *
  * impact counts — EV-weighted, scaled by bucket.count:
  * - builders: basket-building weight (separate mechanism from newlyFree)
