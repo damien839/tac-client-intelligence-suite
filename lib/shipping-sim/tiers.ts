@@ -22,17 +22,19 @@ export function cheapestTier(
   scheme: Scheme,
   gross: number
 ): { tier: CanonicalTier; cost: number } {
-  let best: { tier: CanonicalTier; cost: number } | null = null;
+  let bestTier: CanonicalTier | null = null;
+  let bestCost = 0;
   for (const tier of CANONICAL_TIERS) {
     const config = scheme[tier];
     if (!config) continue;
     const cost = tierCost(config, gross);
-    if (best === null || cost < best.cost) {
-      best = { tier, cost };
+    if (bestTier === null || cost < bestCost) {
+      bestTier = tier;
+      bestCost = cost;
     }
   }
-  if (best === null) {
+  if (bestTier === null) {
     throw new Error("Scheme has no configured tiers");
   }
-  return best;
+  return { tier: bestTier, cost: bestCost };
 }

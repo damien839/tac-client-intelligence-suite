@@ -189,7 +189,9 @@ export function recommendOptions(
     0
   );
   const thresholds = thresholdCandidates(valid);
-  const maxFee = Math.max(2 * std.fee, FEE_FLOOR);
+  const maxFee = Math.ceil(Math.max(2 * std.fee, FEE_FLOOR));
+  // null is always last; the numeric cap is the second-to-last entry.
+  const maxThreshold = thresholds[thresholds.length - 2] as number;
   const noUplift: BehaviorParams = { ...behavior, upliftRate: 0 };
 
   const evalCandidate = (
@@ -208,7 +210,7 @@ export function recommendOptions(
     };
   };
 
-  // Strict > keeps the earliest of tied candidates: lowest threshold, lowest fee.
+  // Strict > keeps the earliest of tied candidates: lowest fee first (grid is fee-major), then lowest threshold.
   const best = (candidates: CandidateResult[]): CandidateResult =>
     candidates.reduce((acc, c) => (c.contributionDelta > acc.contributionDelta ? c : acc));
 
@@ -221,11 +223,15 @@ export function recommendOptions(
   const bestC = best(thresholds.map((t) => evalCandidate(t, std.fee, behavior)));
 
   // Degeneracy guard: with abandonment off, nothing in the model punishes charging
-  // more. Flag optima that charge everyone (no free shipping granted) or pin the
-  // fee at the top of its range.
+  // more. Flag optima that charge everyone (no free shipping granted), pin the fee
+  // at the top of its range, or pin the threshold at the sweep cap (cap-pinned
+  // optima: the true optimum lies beyond the cap).
   const isUnconstrained = (c: CandidateResult, sweepsFee: boolean): boolean =>
     behavior.abandonRate === 0 &&
-    (c.threshold === null || c.result.freeOrderShare === 0 || (sweepsFee && c.fee === maxFee));
+    (c.threshold === null ||
+      c.threshold === maxThreshold ||
+      c.result.freeOrderShare === 0 ||
+      (sweepsFee && c.fee === maxFee));
 
   const toScheme = (
     id: RecommendationId,

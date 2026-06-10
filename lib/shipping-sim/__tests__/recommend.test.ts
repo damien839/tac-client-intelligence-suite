@@ -250,4 +250,47 @@ describe("recommendOptions", () => {
     // T=100 (the current scheme) is always a candidate, so the optimum is never negative.
     expect(a.contributionDelta).toBeGreaterThanOrEqual(0);
   });
+
+  it("flags unconstrained when the basket-builder optimum pins at the sweep cap", () => {
+    // Order at $995 with a tiny $2 fee: building to T=1000 gains (1000-995)*0.8 = $4
+    // of margin vs $2 of fee revenue under flat — so C pins at the $1000 cap. The
+    // ideal threshold lies beyond the cap, so the optimum must be flagged.
+    const cur: Scheme = { standard: { tier: "standard", fee: 2, freeThreshold: 100, avgCost: 3 } };
+    const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 1, upliftWindow: 20, abandonRate: 0 };
+    const recs = recommendOptions(Array.from({ length: 20 }, () => o(995, "standard")), cur, b);
+    const bb = recs.find((r) => r.id === "basket-builder")!;
+    expect(bb.threshold).toBe(1000);
+    expect(bb.unconstrained).toBe(true);
+  });
+
+  it("rounds the fee sweep ceiling up so the fee-pin guard works for non-integer fees", () => {
+    // std fee 16.55 -> ceiling ceil(33.1) = 34. With abandonment 0, revenue is
+    // monotone in fee, so threshold-fee pins at 34 and must be flagged.
+    const cur: Scheme = { standard: { tier: "standard", fee: 16.55, freeThreshold: 100, avgCost: 7 } };
+    const noAbandon: BehaviorParams = { cogsPercent: 0.5, upliftRate: 0, upliftWindow: 20, abandonRate: 0 };
+    const tf = recommendOptions([o(80, "standard")], cur, noAbandon).find((r) => r.id === "threshold-fee")!;
+    expect(tf.fee).toBe(34);
+    expect(tf.unconstrained).toBe(true);
+  });
+
+  it("excludes orders whose tier is not in the current scheme", () => {
+    const stdOnly: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    const withStray = recommendOptions(
+      [o(80, "standard"), o(120, "nextday" as CanonicalTier)],
+      stdOnly,
+      behavior
+    );
+    const without = recommendOptions([o(80, "standard")], stdOnly, behavior);
+    expect(withStray).toEqual(without);
+  });
+
+  it("returns zero deltas without crashing when every order ships free under every candidate", () => {
+    // Fee 0 everywhere -> every candidate is free for everyone -> all deltas 0.
+    const freeScheme: Scheme = { standard: { tier: "standard", fee: 0, freeThreshold: null, avgCost: 7 } };
+    const a = recommendOptions([o(80, "standard")], freeScheme, behavior).find(
+      (r) => r.id === "profit-first"
+    )!;
+    expect(a.contributionDelta).toBe(0);
+    expect(a.netShippingProfitDelta).toBe(0);
+  });
 });
