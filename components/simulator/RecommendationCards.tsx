@@ -135,7 +135,7 @@ export default function RecommendationCards({
       </div>
 
       {cogsPercent === undefined ? (
-        <div className="card">
+        <div className="card no-print">
           <p className="text-sm text-tac-warning">
             Enter a COGS % above to enable recommendations — without it, basket-building
             gains and abandonment losses can&apos;t be valued.

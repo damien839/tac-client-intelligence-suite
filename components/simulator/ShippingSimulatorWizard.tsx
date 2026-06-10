@@ -88,10 +88,15 @@ export default function ShippingSimulatorWizard() {
     [usedTiers, avgCosts]
   );
 
+  // Stable scheme identities — RecommendationCards memoizes its sweep on these,
+  // so inline buildScheme() calls would re-run it on every wizard render.
+  const currentScheme = useMemo(() => buildScheme(currentTiers), [buildScheme, currentTiers]);
+  const proposedScheme = useMemo(() => buildScheme(proposedTiers), [buildScheme, proposedTiers]);
+
   const analysis = useMemo(() => {
     if (step < 3 || taggedOrders.length === 0 || usedTiers.length === 0) return null;
-    return analyze(taggedOrders, buildScheme(currentTiers), buildScheme(proposedTiers), { cogsPercent });
-  }, [step, taggedOrders, usedTiers, buildScheme, currentTiers, proposedTiers, cogsPercent]);
+    return analyze(taggedOrders, currentScheme, proposedScheme, { cogsPercent });
+  }, [step, taggedOrders, usedTiers, currentScheme, proposedScheme, cogsPercent]);
 
   // Seed any unconfigured current-scheme tiers with defaults when the user reaches
   // step 2, so a merchant whose real scheme matches the defaults can proceed without
@@ -195,8 +200,8 @@ export default function ShippingSimulatorWizard() {
             cogsPercent={cogsPercent}
             monthlyOrders={monthlyOrders}
             analysis={analysis}
-            currentScheme={buildScheme(currentTiers)}
-            proposedScheme={buildScheme(proposedTiers)}
+            currentScheme={currentScheme}
+            proposedScheme={proposedScheme}
             onChange={(tier, patch) =>
               setProposedTiers((p) => ({ ...p, [tier]: { fee: 0, freeThreshold: null, ...p[tier], ...patch } }))
             }
