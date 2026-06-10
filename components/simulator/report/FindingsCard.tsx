@@ -20,7 +20,7 @@ function moneySource(evaluation: SchemeEvaluation, currentFacts: SchemeEvaluatio
     { label: "basket-building product margin", value: evaluation.upliftMarginGain },
   ];
   const positive = components.filter((c) => c.value > 0).sort((a, b) => b.value - a.value);
-  if (positive.length === 0) return "No component is positive — the gain comes from losing less than the alternatives.";
+  if (positive.length === 0) return "No component is positive — this option simply loses less than the alternatives.";
   const parts = positive.map((c) => `${c.label} (${signedCurrency(c.value)})`);
   const drag = evaluation.abandonMarginLoss > 0
     ? `, partly offset by ${formatCurrency(evaluation.abandonMarginLoss)} of margin lost to abandonment`
@@ -43,8 +43,12 @@ export default function FindingsCard({
       `${winner.label} (${winner.schemeSummary}) ranks first: ${signedCurrency(w.contributionDelta)} expected total contribution vs current across ${w.orderCount} orders.`
     );
     findings.push(moneySource(w, currentFacts));
+    const newlyPayingClause =
+      w.impact.newlyPaying >= 0.05
+        ? `, and ${w.impact.newlyPaying.toFixed(1)} orders that ship free today would start paying shipping`
+        : "";
     findings.push(
-      `Risk: ${w.expectedOrdersLost.toFixed(1)} orders expected lost to abandonment, and ${w.impact.newlyPaying.toFixed(1)} orders that ship free today would start paying shipping.`
+      `Risk: ${w.expectedOrdersLost.toFixed(1)} orders expected lost to abandonment${newlyPayingClause}.`
     );
     if (monthlyOrders !== undefined && w.orderCount > 0) {
       const perOrder = w.contributionDelta / w.orderCount;

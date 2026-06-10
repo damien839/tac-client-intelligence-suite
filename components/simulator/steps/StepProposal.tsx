@@ -52,6 +52,8 @@ export default function StepProposal({
 
   // Defer the sweep inputs so typing stays responsive while the grids recompute.
   const deferredCogs = useDeferredValue(cogsPercent);
+  // Deferred so large-file recomputes (rec evaluations) don't run inside the Custom keystroke render.
+  const deferredProposedScheme = useDeferredValue(proposedScheme);
   const deferredUplift = useDeferredValue(upliftRate);
   const deferredWindow = useDeferredValue(upliftWindow);
   const deferredAbandon = useDeferredValue(abandonRate);
@@ -72,22 +74,23 @@ export default function StepProposal({
   );
 
   const customEval = useMemo(
-    () => (behavior ? evaluateScheme(orders, currentScheme, proposedScheme, behavior) : null),
-    [orders, currentScheme, proposedScheme, behavior]
+    () => (behavior ? evaluateScheme(orders, currentScheme, deferredProposedScheme, behavior) : null),
+    [orders, currentScheme, deferredProposedScheme, behavior]
   );
 
   // Current column = deterministic observed baseline: behaviour zeroed. Not gated on
-  // COGS — with uplift and abandonment at 0, cogsPercent affects nothing, and the
-  // reconciliation badge must render pre-COGS.
+  // COGS — with uplift and abandonment at 0, cogsPercent affects nothing (no margin
+  // uplift or abandonment loss to scale), so a constant 0 is correct and keeps this
+  // memo independent of deferredCogs.
   const currentFacts = useMemo(
     () =>
       evaluateScheme(orders, currentScheme, currentScheme, {
-        cogsPercent: deferredCogs ?? 0,
+        cogsPercent: 0,
         upliftRate: 0,
         upliftWindow: 20,
         abandonRate: 0,
       }),
-    [orders, currentScheme, deferredCogs]
+    [orders, currentScheme]
   );
 
   // The same valid-order set the engine evaluates — drives reconciliation + AOV strip.
@@ -117,36 +120,42 @@ export default function StepProposal({
     [orders, currentScheme, behavior]
   );
 
-  // Each option fully evaluated through the same engine as the comparison table.
-  // Profit-first / Optimised force uplift off (matching recommendOptions); Basket-builder
-  // uses the full behaviour params — so each evaluation reproduces the rec's deltas.
-  const reportOptions = useMemo<ReportOption[]>(() => {
-    if (!behavior) return [];
+  // The three rec options: evaluated once per rec change, not on every Custom keystroke.
+  const recReportOptions = useMemo<ReportOption[]>(() => {
+    if (!behavior || !recs) return [];
     const std = currentScheme.standard;
-    const recOptions: ReportOption[] = [];
-    if (recs && std) {
-      for (const rec of recs) {
-        const scheme: Scheme = {
-          ...currentScheme,
-          standard: { ...std, fee: rec.fee, freeThreshold: rec.threshold },
-        };
-        const params =
-          rec.id === "basket-builder" ? behavior : { ...behavior, upliftRate: 0 };
-        const evaluation = evaluateScheme(orders, currentScheme, scheme, params);
-        if (evaluation) {
-          recOptions.push({
-            key: rec.id,
-            label: rec.label,
-            shortLabel: OPTION_SHORT_LABELS[rec.id],
-            color: OPTION_COLORS[rec.id],
-            schemeSummary: describeStandard(scheme.standard),
-            threshold: rec.threshold,
-            evaluation,
-            unconstrained: rec.unconstrained,
-          });
-        }
+    if (!std) return [];
+    const result: ReportOption[] = [];
+    for (const rec of recs) {
+      const scheme: Scheme = {
+        ...currentScheme,
+        standard: { ...std, fee: rec.fee, freeThreshold: rec.threshold },
+      };
+      // Profit-first / Optimised force uplift off (matching recommendOptions);
+      // Basket-builder uses the full behaviour params — so each evaluation reproduces
+      // the rec's deltas exactly.
+      const params =
+        rec.id === "basket-builder" ? behavior : { ...behavior, upliftRate: 0 };
+      const evaluation = evaluateScheme(orders, currentScheme, scheme, params);
+      if (evaluation) {
+        result.push({
+          key: rec.id,
+          label: rec.label,
+          shortLabel: OPTION_SHORT_LABELS[rec.id],
+          color: OPTION_COLORS[rec.id],
+          schemeSummary: describeStandard(scheme.standard),
+          threshold: rec.threshold,
+          evaluation,
+          unconstrained: rec.unconstrained,
+        });
       }
     }
+    return result;
+  }, [behavior, recs, orders, currentScheme]);
+
+  // Merge rec options with the Custom option. Custom reads from deferredProposedScheme
+  // so it only recomputes after the keystroke render has settled.
+  const reportOptions = useMemo<ReportOption[]>(() => {
     const customOption: ReportOption[] = customEval
       ? [
           {
@@ -154,14 +163,14 @@ export default function StepProposal({
             label: "Custom",
             shortLabel: OPTION_SHORT_LABELS.custom,
             color: OPTION_COLORS.custom,
-            schemeSummary: describeStandard(proposedScheme.standard),
-            threshold: proposedScheme.standard?.freeThreshold ?? null,
+            schemeSummary: describeStandard(deferredProposedScheme.standard),
+            threshold: deferredProposedScheme.standard?.freeThreshold ?? null,
             evaluation: customEval,
           },
         ]
       : [];
-    return [...recOptions, ...customOption];
-  }, [behavior, recs, customEval, orders, currentScheme, proposedScheme]);
+    return [...recReportOptions, ...customOption];
+  }, [recReportOptions, customEval, deferredProposedScheme]);
 
   // Custom = Current per used tier (fee + free threshold)? Then it adds no information
   // and stays out of the verdict ranking.

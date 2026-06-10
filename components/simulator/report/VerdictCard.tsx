@@ -33,15 +33,38 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
   }
 
   const w = winner.evaluation;
+  const delta = w.contributionDelta;
   const freeShiftFrom = formatPercent(currentFacts.freeOrderShare, 0);
   const freeShiftTo = formatPercent(w.freeOrderShare, 0);
+
+  // No option beats current — present the "keep current" path rather than a false win.
+  if (delta <= 0) {
+    return (
+      <div className="card border-l-2 border-l-tac-warning">
+        <h3 className="text-lg font-semibold mb-2 text-tac-accent">Verdict</h3>
+        <p className="text-sm mb-2">
+          No modelled option beats the current scheme under these assumptions — the best candidate (
+          <strong className="text-tac-accent">{winner.label}</strong>) still shows{" "}
+          <strong>{signedCurrency(delta)}</strong> expected total contribution. Keeping the current
+          scheme is the defensible default; revisit after adjusting the assumptions or the Custom
+          scheme.
+        </p>
+        {winner.unconstrained && (
+          <p className="text-sm text-tac-warning mt-2">
+            Reliability caveat: abandonment is 0%, so nothing in the model punishes charging more —
+            this optimum may be unreliable. Set an abandonment rate before trusting it.
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="card border-l-2 border-l-tac-accent">
       <h3 className="text-lg font-semibold mb-2 text-tac-accent">Verdict</h3>
       <p className="text-sm mb-2">
         <strong className="text-tac-accent">{winner.label}</strong> ({winner.schemeSummary}) leads
-        with <strong>{signedCurrency(w.contributionDelta)}</strong> expected total contribution vs
+        with <strong>{signedCurrency(delta)}</strong> expected total contribution vs
         current across {w.orderCount} orders
         {monthlyOrders !== undefined && w.orderCount > 0 && (
           <>
@@ -59,7 +82,7 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
         <p className="text-sm text-tac-muted">
           Runner-up <strong className="text-tac-text">{runnerUp.label}</strong> follows at{" "}
           {signedCurrency(runnerUp.evaluation.contributionDelta)} (
-          {formatCurrency(w.contributionDelta - runnerUp.evaluation.contributionDelta)} behind),
+          {formatCurrency(delta - runnerUp.evaluation.contributionDelta)} behind),
           losing {runnerUp.evaluation.expectedOrdersLost.toFixed(1)} orders vs the winner&apos;s{" "}
           {w.expectedOrdersLost.toFixed(1)}.
         </p>

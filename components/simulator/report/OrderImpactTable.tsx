@@ -16,7 +16,7 @@ const ROWS: { label: string; value: (e: SchemeEvaluation) => number }[] = [
 ];
 
 function renderCount(value: number): string {
-  return value === 0 ? "—" : value.toFixed(1);
+  return value < 0.05 ? "—" : value.toFixed(1);
 }
 
 export default function OrderImpactTable({ options }: OrderImpactTableProps) {
