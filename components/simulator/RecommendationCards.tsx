@@ -72,11 +72,13 @@ export default function RecommendationCards({
     );
   }
 
+  // Echo the DEFERRED values — the card numbers were computed from these, so the
+  // caption and the figures it explains stay atomically consistent mid-drag.
   const assumptionLine = (rec: RecommendedScheme): string => {
-    const abandon = `${Math.round(abandonRate * 100)}% of worse-off orders abandon`;
-    const cogs = `COGS ${Math.round((cogsPercent ?? 0) * 100)}%`;
+    const abandon = `${Math.round(deferredAbandon * 100)}% of worse-off orders abandon`;
+    const cogs = `COGS ${Math.round((deferredCogs ?? 0) * 100)}%`;
     if (rec.id === "basket-builder") {
-      return `${Math.round(upliftRate * 100)}% of orders within $${upliftWindow} below the threshold build baskets; ${abandon}; ${cogs}`;
+      return `${Math.round(deferredUplift * 100)}% of orders within $${deferredWindow} below the threshold build baskets; ${abandon}; ${cogs}`;
     }
     return `No basket-building assumed; ${abandon}; ${cogs}`;
   };
@@ -164,7 +166,7 @@ export default function RecommendationCards({
                     : `Free over $${rec.threshold}`}
                 </p>
                 <p className="text-xs text-tac-muted mb-3">
-                  Standard fee ${rec.fee}
+                  Standard fee {formatCurrency(rec.fee)}
                   {rec.id !== "threshold-fee" && " (unchanged)"}
                 </p>
 

@@ -53,7 +53,7 @@ So an in-window, worse-off order splits `u` build / `(1−u)·a` abandon / `(1�
 
 **Objective per candidate:** `contributionDelta = (netShippingProfit_candidate − netShippingProfit_current) + upliftMarginGain − abandonMarginLoss`. With uplift and abandonment at 0 this reduces exactly to today's sweep objective.
 
-**Degeneracy guard:** if a card's optimum sits at the top of the threshold (or fee) range while `abandonRate === 0`, the card shows a warning that the optimum is unconstrained and the abandonment slider should be set.
+**Degeneracy guard:** with `abandonRate === 0`, a card's optimum is flagged unconstrained when it sits at the top of the threshold or fee range, is the flat (`null`) candidate, or grants free shipping to no one (`freeOrderShare === 0` — a charges-everyone optimum below the range edge). The card shows a warning that the optimum may be unreliable and the abandonment slider should be set. (As built — broader than the original "top of range" wording; the extra arms catch effectively-flat optima the edge check would miss.)
 
 ## Sweep ranges
 
