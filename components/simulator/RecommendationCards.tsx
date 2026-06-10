@@ -25,6 +25,11 @@ function signedCurrency(value: number): string {
   return `${normalized >= 0 ? "+" : ""}${formatCurrency(normalized)}`;
 }
 
+/** Fraction -> percent for display, rounded to 0.1 to hide float artifacts (0.55 -> 55, not 55.00000000000001). */
+function toPercent(fraction: number): number {
+  return Math.round(fraction * 1000) / 10;
+}
+
 export default function RecommendationCards({
   orders,
   currentScheme,
@@ -94,7 +99,7 @@ export default function RecommendationCards({
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <InputField
             label="COGS %"
-            value={(cogsPercent ?? 0) * 100}
+            value={toPercent(cogsPercent ?? 0)}
             onChange={(v) => onCogsChange(v / 100)}
             suffix="%"
             step={1}
@@ -104,7 +109,7 @@ export default function RecommendationCards({
           />
           <InputField
             label="Basket uplift"
-            value={upliftRate * 100}
+            value={toPercent(upliftRate)}
             onChange={(v) => setUpliftRate(v / 100)}
             suffix="%"
             step={5}
@@ -123,7 +128,7 @@ export default function RecommendationCards({
           />
           <InputField
             label="Abandonment"
-            value={abandonRate * 100}
+            value={toPercent(abandonRate)}
             onChange={(v) => setAbandonRate(v / 100)}
             suffix="%"
             step={1}
