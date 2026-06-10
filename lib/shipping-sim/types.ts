@@ -106,3 +106,48 @@ export interface Analysis {
   optimalNet: number;
   netDeltaPerOrder: number;
 }
+
+/** Tunable behavioural assumptions driving the recommendation engine. */
+export interface BehaviorParams {
+  cogsPercent: number; // 0..1 — required to value product-margin effects
+  upliftRate: number; // 0..1 — share of in-window orders that build baskets to the threshold
+  upliftWindow: number; // $ — "in window" = within this much below the landed tier's threshold
+  abandonRate: number; // 0..1 — share of worse-off orders (shipping cost rose vs current) that abandon
+}
+
+/** Orders grouped by identical behaviour under the model. */
+export interface OrderBucket {
+  tier: CanonicalTier;
+  gross: number;
+  count: number;
+}
+
+/** Expected-value outcome of one candidate scheme under the behavioural model. */
+export interface BehavioralResult {
+  shippingRevenue: number;
+  carrierSpend: number;
+  netShippingProfit: number; // shippingRevenue - carrierSpend
+  upliftMarginGain: number; // product margin added by basket-building
+  abandonMarginLoss: number; // product margin lost to abandonment
+  expectedOrdersLost: number; // abandonment, in (fractional) orders
+  freeOrderShare: number; // 0..1 of completing orders that ship free
+  recoveryRate: number; // shippingRevenue / carrierSpend (0 when spend is 0)
+}
+
+export type RecommendationId = "profit-first" | "threshold-fee" | "basket-builder";
+
+/** One recommendation card. */
+export interface RecommendedScheme {
+  id: RecommendationId;
+  label: string;
+  threshold: number | null; // recommended standard free-over (null = flat)
+  fee: number; // standard fee (= current fee for profit-first / basket-builder)
+  contributionDelta: number; // objective: shipping P&L delta + margin effects, vs current
+  netShippingProfitDelta: number;
+  upliftMarginGain: number; // 0 for profit-first / threshold-fee
+  abandonMarginLoss: number;
+  freeOrderShare: number;
+  recoveryRate: number;
+  expectedOrdersLost: number;
+  unconstrained: boolean; // degeneracy guard tripped — see recommend.ts
+}
