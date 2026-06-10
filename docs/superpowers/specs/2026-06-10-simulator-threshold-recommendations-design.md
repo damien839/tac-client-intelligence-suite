@@ -93,17 +93,25 @@ export interface RecommendedScheme {
 }
 ```
 
-## UI
+## UI — v2 comparison report (revised 2026-06-10 after Damo feedback; supersedes the v1 Apply-card design below)
 
-`components/simulator/RecommendationCards.tsx`, rendered at the top of Step 4 (above the tier rows in `StepProposal`):
+Step 4 is a **comparison report**, not a pick-one proposal. Damo's direction: "We should be having a side by side comparison against the 3 showing the value and impacts… the report should give all information based on the 3 options."
 
-- **Assumptions panel** (compact card, `no-print` for the sliders but assumptions echoed as text on each card so the PDF shows them): COGS %, uplift %, uplift window $, abandonment %. Behaviour-param state is local to this component; COGS reuses the wizard's existing `cogsPercent` (the panel prompts for it when unset — cards don't compute without COGS).
-- **Three cards**: label, recommended threshold (and fee for B), Δ total contribution, Δ net shipping profit, free-order share, recovery rate, expected orders lost; the formula/assumption line in small text ("30% of orders within $20 build; 10% of worse-off orders abandon; COGS 55%"). Numbers always shown with their inputs — never a bare estimate.
-- **Apply button** per card: sets the proposal's standard-tier `fee`/`freeThreshold` to the card's values (other tiers untouched). The existing benchmark/analysis recomputes live as today. The card whose values match the current proposal inputs shows an "applied" state.
+`components/simulator/OptionsComparison.tsx` replaces `RecommendationCards.tsx`:
 
-Wiring: `StepProposal` gains `orders: TaggedOrder[]` and an `onApply(patch)` prop from the wizard (wizard already holds `taggedOrders`, `currentScheme`, and the proposal setter).
+- **Assumptions panel** — unchanged from v1 (COGS %, uplift %, uplift window $, abandonment % sliders; `no-print`; COGS gates the report).
+- **Comparison table** — columns **Current | Profit-first | Optimised threshold + fee | Basket-builder | Custom**. Rows: standard-tier scheme summary (free-over + fee), Δ total contribution, Δ net shipping profit, basket margin gain, abandonment margin loss, expected orders lost, free-order share, cost recovery, and (when monthly volume is set) the illustrative monthly/annual Δ scaled the same way BenchmarkPanel does. The Current column shows the deterministic observed baseline (no behaviour applied); option columns are expected-value metrics vs that baseline. Unconstrained optima are marked in their column. Assumption echo line printed beneath the table.
+- **Custom column** — driven by the existing manual tier inputs (which stay, below the table, `no-print` as today). Evaluated with the same behavioural model via a new pure `evaluateScheme()` so it is directly comparable. Starts seeded = current scheme (all-zero deltas) until edited.
+- **Drill-down tabs** (`no-print` for the tab strip) — Profit-first / Optimised / Basket-builder / Custom. The selected option's scheme feeds the EXISTING full analysis (`analyze()` → BenchmarkPanel: verdict, recovery gauges, profit bridge, mix shift, movement, sweep, findings). A printed caption notes the drill-down is the structural comparison at observed carts — behaviour assumptions apply to the table, not these charts.
+- **No Apply button / no applied state.** The PDF export = assumptions echo + comparison table + the selected option's full analysis.
+
+Engine addition: `evaluateScheme(orders, current, candidate, behavior)` exported from `lib/shipping-sim/recommend.ts` — same metric bundle as a `RecommendedScheme` (deltas, margin effects, shares) for an arbitrary candidate scheme; used for the Custom column. Step-4 computation (recommendations, per-option analysis) moves from the wizard into `StepProposal`, which already receives the raw materials.
 
 Brand: existing `tac-*` tokens, consistent with the rest of the analysis panel.
+
+### v1 UI (superseded, kept for history)
+
+Three cards with one-click Apply writing into the proposal inputs; "applied" state on the matching card. Replaced because applying mutated the single report instead of presenting the three options side by side.
 
 ## Testing
 
