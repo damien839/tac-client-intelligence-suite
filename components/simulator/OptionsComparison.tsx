@@ -40,6 +40,7 @@ interface Column {
   evaluation: SchemeEvaluation | null;
   isBaseline: boolean;
   unconstrained?: boolean;
+  capPinned?: boolean;
   option?: ReportOption;
 }
 
@@ -93,6 +94,7 @@ export default function OptionsComparison({
       evaluation: option.evaluation,
       isBaseline: false,
       unconstrained: option.unconstrained,
+      capPinned: option.capPinned,
       option,
     })),
   ];
@@ -104,6 +106,7 @@ export default function OptionsComparison({
 
   const orderCount = currentFacts?.orderCount ?? 0;
   const anyUnconstrained = options.some((option) => option.unconstrained);
+  const anyCapPinned = options.some((option) => option.capPinned && !option.unconstrained);
 
   /**
    * Per-tier scheme summary for a column. Recommendations only optimise the standard
@@ -292,6 +295,9 @@ export default function OptionsComparison({
                       <span className={col.isBaseline ? "text-tac-muted" : "text-tac-accent"}>
                         {col.label}
                         {col.unconstrained && <span title="Optimum may be unreliable at 0% abandonment">*</span>}
+                        {col.capPinned && !col.unconstrained && (
+                          <span title="Optimum sits at the edge of the tested range — the best value may lie beyond it. Treat as directional.">†</span>
+                        )}
                       </span>
                     </th>
                   ))}
@@ -340,10 +346,16 @@ export default function OptionsComparison({
                 optimum may be unreliable. Set an abandonment rate before trusting it.
               </p>
             )}
+            {anyCapPinned && (
+              <p className="text-xs text-tac-warning mt-1">
+                † Optimum sits at the edge of the tested range — the best value may lie beyond
+                it. Treat as directional.
+              </p>
+            )}
           </div>
 
           {recsEmpty && (
-            <div className="card no-print">
+            <div className="card">
               <p className="text-sm text-tac-muted">
                 Recommendations target the standard free-over line — map a service to Standard to
                 enable the three recommended options. The table compares Current vs Custom only.

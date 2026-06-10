@@ -279,6 +279,12 @@ export function recommendOptions(
       c.result.freeOrderShare === 0 ||
       (sweepsFee && c.fee === maxFee));
 
+  // Cap-pinned: the optimum sits at the edge of the sweep range — the true best value
+  // may lie beyond it. Null threshold is NOT cap-pinned (flat is a complete answer,
+  // not a truncated one).
+  const isCapPinned = (c: CandidateResult, sweepsFee: boolean): boolean =>
+    c.threshold === maxThreshold || (sweepsFee && c.fee === maxFee);
+
   const toScheme = (
     id: RecommendationId,
     label: string,
@@ -297,6 +303,7 @@ export function recommendOptions(
     recoveryRate: c.result.recoveryRate,
     expectedOrdersLost: c.result.expectedOrdersLost,
     unconstrained: isUnconstrained(c, sweepsFee),
+    capPinned: isCapPinned(c, sweepsFee),
   });
 
   return [

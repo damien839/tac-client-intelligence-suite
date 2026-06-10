@@ -147,6 +147,7 @@ export default function StepProposal({
           threshold: rec.threshold,
           evaluation,
           unconstrained: rec.unconstrained,
+          capPinned: rec.capPinned,
         });
       }
     }
@@ -195,7 +196,7 @@ export default function StepProposal({
         options={reportOptions}
         currentFacts={currentFacts}
         currentScheme={currentScheme}
-        customScheme={proposedScheme}
+        customScheme={deferredProposedScheme}
         recsEmpty={recs !== null && recs.length === 0}
         cogsPercent={cogsPercent}
         monthlyOrders={monthlyOrders}

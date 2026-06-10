@@ -192,4 +192,6 @@ export interface RecommendedScheme {
   recoveryRate: number;
   expectedOrdersLost: number;
   unconstrained: boolean; // degeneracy guard tripped — see recommend.ts
+  /** Optimum sits at the sweep limit — the true optimum may lie beyond the tested range. */
+  capPinned: boolean;
 }

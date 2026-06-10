@@ -289,6 +289,57 @@ describe("recommendOptions", () => {
     expect(bb.unconstrained).toBe(true);
   });
 
+  it("sets capPinned=true when the fee optimum pins at the fee cap with non-zero abandonment", () => {
+    // Current: std fee $30, free over $250, cost $7.
+    // Five orders at gross [100, 120, 140, 160, 180] — all below T=250, all paying $30 today.
+    // behavior: cogsPercent 0.3, upliftRate 0, upliftWindow 20, abandonRate 0.01.
+    // maxFee = ceil(max(2*30, 30)) = 60.
+    //
+    // Working at fee=60, Δ=30, abandonProb = 0.01*(30/10) = 0.03:
+    //   shippingRevenue  = 5 × 0.97 × 60 = 291
+    //   carrierSpend     = 5 × 0.97 × 7  = 33.95
+    //   netShippingProfit = 257.05; baseline = 5×(30-7) = 115
+    //   abandonMarginLoss = 0.03 × 0.7 × 700 = 14.7
+    //   contributionDelta = 257.05 - 115 - 14.7 = 127.35
+    //
+    // At fee=59, Δ=29, abandonProb=0.029:
+    //   contributionDelta ≈ 123.25  →  fee=60 strictly better → optimum pins at cap.
+    //
+    // Since abandonRate > 0: unconstrained=false, but capPinned=true (fee===maxFee).
+    const cur: Scheme = {
+      standard: { tier: "standard", fee: 30, freeThreshold: 250, avgCost: 7 },
+    };
+    const b: BehaviorParams = {
+      cogsPercent: 0.3,
+      upliftRate: 0,
+      upliftWindow: 20,
+      abandonRate: 0.01,
+    };
+    const orders = [
+      o(100, "standard"),
+      o(120, "standard"),
+      o(140, "standard"),
+      o(160, "standard"),
+      o(180, "standard"),
+    ];
+    const tf = recommendOptions(orders, cur, b).find((r) => r.id === "threshold-fee")!;
+    expect(tf.fee).toBe(60); // pins at the cap
+    expect(tf.unconstrained).toBe(false); // abandonRate > 0 → not unconstrained
+    expect(tf.capPinned).toBe(true); // fee === maxFee → true optimum may lie beyond
+  });
+
+  it("sets capPinned=false for the hand-verified single-tier case (interior optimum)", () => {
+    // Reuse the existing single-tier fixture: T=200, fee=10. The basket-builder
+    // optimum lands at T=200 (interior, well below maxThreshold=400) with fee=10
+    // (unchanged). capPinned must be false.
+    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 200, avgCost: 7 } };
+    const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 1, upliftWindow: 20, abandonRate: 0 };
+    const recs = recommendOptions([o(185, "standard")], cur, b);
+    const bb = recs.find((r) => r.id === "basket-builder")!;
+    expect(bb.threshold).toBe(200);
+    expect(bb.capPinned).toBe(false); // threshold 200 < maxThreshold 400
+  });
+
   it("rounds the fee sweep ceiling up so the fee-pin guard works for non-integer fees", () => {
     // std fee 16.55 -> ceiling ceil(33.1) = 34. With abandonment 0, revenue is
     // monotone in fee, so threshold-fee pins at 34 and must be flagged.

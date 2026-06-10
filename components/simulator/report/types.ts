@@ -12,6 +12,7 @@ export interface ReportOption {
   threshold: number | null; // standard free-over line (null = flat / no free shipping)
   evaluation: SchemeEvaluation;
   unconstrained?: boolean;
+  capPinned?: boolean;
 }
 
 export const OPTION_SHORT_LABELS: Record<OptionKey, string> = {
