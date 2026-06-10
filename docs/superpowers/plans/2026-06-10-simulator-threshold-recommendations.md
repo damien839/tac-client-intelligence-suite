@@ -465,7 +465,7 @@ describe("thresholdCandidates", () => {
     expect(small).toContain(150); // $10 steps
 
     const big = thresholdCandidates(Array.from({ length: 20 }, () => o(950, "standard")));
-    expect(big[big.length - 2]).toBe(960); // ceil(950/10)*10, above the 400 floor
+    expect(big[big.length - 2]).toBe(950); // ceil(950/10)*10, above the 400 floor
   });
 
   it("caps the sweep at $1000", () => {

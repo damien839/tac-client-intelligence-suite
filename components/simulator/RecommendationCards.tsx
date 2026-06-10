@@ -21,7 +21,8 @@ interface RecommendationCardsProps {
 }
 
 function signedCurrency(value: number): string {
-  return `${value >= 0 ? "+" : ""}${formatCurrency(value)}`;
+  const normalized = value === 0 ? 0 : value; // avoid "+-$0.00" from negative zero
+  return `${normalized >= 0 ? "+" : ""}${formatCurrency(normalized)}`;
 }
 
 export default function RecommendationCards({
