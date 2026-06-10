@@ -1,6 +1,5 @@
 "use client";
 
-import { OrderMovement, TIER_LABELS } from "@/lib/shipping-sim/types";
 import { formatCurrency } from "@/lib/calculations";
 
 export interface ThresholdMarker {
@@ -10,25 +9,25 @@ export interface ThresholdMarker {
 }
 
 interface AovDistributionProps {
-  movement: OrderMovement[];
+  grossValues: number[];
   markers: ThresholdMarker[];
 }
 
 /** Inline-SVG strip: each order plotted by cart value against the free-shipping lines. */
-export default function AovDistribution({ movement, markers }: AovDistributionProps) {
+export default function AovDistribution({ grossValues, markers }: AovDistributionProps) {
   const W = 760;
-  const H = 130;
+  const H = 110;
   const padL = 12;
   const padR = 12;
   const padB = 28;
-  const padT = 22;
+  const padT = 26;
 
-  const maxGross = Math.max(300, ...movement.map((m) => m.gross));
+  const maxGross = Math.max(300, ...grossValues);
   const x = (g: number) => padL + (g / maxGross) * (W - padL - padR);
 
   return (
     <div className="card">
-      <h3 className="text-lg font-semibold mb-4 text-tac-accent">Where orders sit vs your thresholds</h3>
+      <h3 className="text-lg font-semibold mb-4 text-tac-accent">Where orders sit vs the thresholds</h3>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Order cart values vs thresholds" className="text-tac-text">
         {markers.map((m, i) => (
           <g key={i}>
@@ -40,8 +39,8 @@ export default function AovDistribution({ movement, markers }: AovDistributionPr
               stroke={m.color}
               strokeDasharray="3 3"
             />
-            <text x={x(m.value)} y={padT - 6} textAnchor="middle" fontSize="9" fill={m.color}>
-              ${m.value}
+            <text x={x(m.value)} y={padT - 6 - (i % 2) * 9} textAnchor="middle" fontSize="9" fill={m.color}>
+              {m.label} ${m.value}
             </text>
           </g>
         ))}
@@ -53,30 +52,15 @@ export default function AovDistribution({ movement, markers }: AovDistributionPr
           </text>
         ))}
 
-        <text x={padL} y={H - padB - 30} fontSize="9" fill="currentColor">
-          Express
-        </text>
-        <text x={padL} y={H - padB - 8} fontSize="9" fill="currentColor">
-          Standard
-        </text>
-
-        {movement.map((m, i) => {
-          const cx = x(m.gross);
-          const cy = m.chosenTier === "express" ? H - padB - 26 : H - padB - 6;
-          const fill = m.moved ? "#F5B36B" : m.chosenTier === "express" ? "#6088aa" : "#A0AEB8";
-          return (
-            <circle key={i} cx={cx} cy={cy} r={6} fill={fill} opacity={0.9}>
-              <title>
-                {formatCurrency(m.gross)} · {TIER_LABELS[m.chosenTier]}
-                {m.moved ? ` → ${TIER_LABELS[m.landedTier]}` : ""}
-              </title>
-            </circle>
-          );
-        })}
+        {grossValues.map((gross, i) => (
+          <circle key={i} cx={x(gross)} cy={H - padB - 10} r={6} fill="#A0AEB8" opacity={0.55}>
+            <title>{formatCurrency(gross)}</title>
+          </circle>
+        ))}
       </svg>
       <p className="text-xs text-tac-muted mt-2">
-        Each dot is an order by cart value. Orange dots change tier under the proposal. Watch orders
-        clustered just below a new free-shipping line — those are now being asked to pay.
+        Each dot is an order by cart value. Watch orders clustered just below a free-shipping
+        line — under that option they are being asked to pay (or to build their basket up to it).
       </p>
     </div>
   );

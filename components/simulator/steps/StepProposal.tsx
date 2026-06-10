@@ -2,24 +2,23 @@
 
 import { useDeferredValue, useMemo, useState } from "react";
 import TierConfigRow from "../TierConfigRow";
-import BenchmarkPanel from "../BenchmarkPanel";
 import InputField from "@/components/shared/InputField";
-import OptionsComparison, { OptionKey } from "../OptionsComparison";
-import { analyze } from "@/lib/shipping-sim/analysis";
-import { evaluateScheme, recommendOptions } from "@/lib/shipping-sim/recommend";
+import OptionsComparison from "../OptionsComparison";
+import ComparisonReport from "../ComparisonReport";
+import { describeStandard } from "../analysis/format";
+import {
+  OPTION_COLORS,
+  OPTION_SHORT_LABELS,
+  ReportOption,
+} from "../report/types";
+import { evaluateScheme, recommendOptions, thresholdCurves } from "@/lib/shipping-sim/recommend";
 import {
   BehaviorParams,
   CanonicalTier,
+  Reconciliation,
   Scheme,
   TaggedOrder,
 } from "@/lib/shipping-sim/types";
-
-const OPTION_LABELS: Record<OptionKey, string> = {
-  "profit-first": "Profit-first",
-  "threshold-fee": "Optimised threshold + fee",
-  "basket-builder": "Basket-builder",
-  custom: "Custom",
-};
 
 interface StepProposalProps {
   orders: TaggedOrder[];
@@ -49,7 +48,6 @@ export default function StepProposal({
   const [upliftRate, setUpliftRate] = useState(0.3);
   const [upliftWindow, setUpliftWindow] = useState(20);
   const [abandonRate, setAbandonRate] = useState(0.1);
-  const [selected, setSelected] = useState<OptionKey>("profit-first");
 
   // Defer the sweep inputs so typing stays responsive while the grids recompute.
   const deferredCogs = useDeferredValue(cogsPercent);
@@ -90,27 +88,95 @@ export default function StepProposal({
     [orders, currentScheme, behavior]
   );
 
-  // Scheme for the selected REC tab (null when custom / recs unavailable).
-  // Memoized separately so Custom keystrokes don't change its identity.
-  const recScheme = useMemo<Scheme | null>(() => {
-    if (selected === "custom" || !recs || !currentScheme.standard) return null;
-    const rec = recs.find((r) => r.id === selected);
-    if (!rec) return null;
+  // The same valid-order set the engine evaluates — drives reconciliation + AOV strip.
+  const validOrders = useMemo(
+    () => orders.filter((order) => currentScheme[order.tier] !== undefined),
+    [orders, currentScheme]
+  );
+
+  const grossValues = useMemo(() => validOrders.map((order) => order.gross), [validOrders]);
+
+  const reconciliation = useMemo<Reconciliation | null>(() => {
+    if (!currentFacts) return null;
+    const actualShippingPaid = validOrders.reduce((sum, order) => sum + order.shippingPaid, 0);
+    const modelledCurrentRevenue = currentFacts.shippingRevenue;
     return {
-      ...currentScheme,
-      standard: { ...currentScheme.standard, fee: rec.fee, freeThreshold: rec.threshold },
+      actualShippingPaid,
+      modelledCurrentRevenue,
+      variancePct:
+        actualShippingPaid > 0
+          ? Math.abs(modelledCurrentRevenue - actualShippingPaid) / actualShippingPaid
+          : 0,
     };
-  }, [selected, recs, currentScheme]);
+  }, [validOrders, currentFacts]);
 
-  const selectedScheme = recScheme ?? proposedScheme;
+  const curves = useMemo(
+    () => (behavior ? thresholdCurves(orders, currentScheme, behavior) : []),
+    [orders, currentScheme, behavior]
+  );
 
-  // recScheme is non-null exactly when a rec tab is active.
-  const drilldownKey: OptionKey = recScheme ? selected : "custom";
+  // Each option fully evaluated through the same engine as the comparison table.
+  // Profit-first / Optimised force uplift off (matching recommendOptions); Basket-builder
+  // uses the full behaviour params — so each evaluation reproduces the rec's deltas.
+  const reportOptions = useMemo<ReportOption[]>(() => {
+    if (!behavior) return [];
+    const std = currentScheme.standard;
+    const recOptions: ReportOption[] = [];
+    if (recs && std) {
+      for (const rec of recs) {
+        const scheme: Scheme = {
+          ...currentScheme,
+          standard: { ...std, fee: rec.fee, freeThreshold: rec.threshold },
+        };
+        const params =
+          rec.id === "basket-builder" ? behavior : { ...behavior, upliftRate: 0 };
+        const evaluation = evaluateScheme(orders, currentScheme, scheme, params);
+        if (evaluation) {
+          recOptions.push({
+            key: rec.id,
+            label: rec.label,
+            shortLabel: OPTION_SHORT_LABELS[rec.id],
+            color: OPTION_COLORS[rec.id],
+            schemeSummary: describeStandard(scheme.standard),
+            threshold: rec.threshold,
+            evaluation,
+            unconstrained: rec.unconstrained,
+          });
+        }
+      }
+    }
+    const customOption: ReportOption[] = customEval
+      ? [
+          {
+            key: "custom",
+            label: "Custom",
+            shortLabel: OPTION_SHORT_LABELS.custom,
+            color: OPTION_COLORS.custom,
+            schemeSummary: describeStandard(proposedScheme.standard),
+            threshold: proposedScheme.standard?.freeThreshold ?? null,
+            evaluation: customEval,
+          },
+        ]
+      : [];
+    return [...recOptions, ...customOption];
+  }, [behavior, recs, customEval, orders, currentScheme, proposedScheme]);
 
-  const analysis = useMemo(() => {
-    if (orders.length === 0 || usedTiers.length === 0) return null;
-    return analyze(orders, currentScheme, selectedScheme, { cogsPercent: deferredCogs });
-  }, [orders, usedTiers, currentScheme, selectedScheme, deferredCogs]);
+  // Custom = Current per used tier (fee + free threshold)? Then it adds no information
+  // and stays out of the verdict ranking.
+  const customIsCurrent = useMemo(
+    () =>
+      usedTiers.every((tier) => {
+        const current = currentScheme[tier];
+        const proposed = proposedScheme[tier];
+        if (!current || !proposed) return current === proposed;
+        return current.fee === proposed.fee && current.freeThreshold === proposed.freeThreshold;
+      }),
+    [usedTiers, currentScheme, proposedScheme]
+  );
+
+  // Single source for the printed assumptions line — built from the deferred values the
+  // metrics were actually computed from, so caption and numbers stay consistent mid-drag.
+  const assumptionEcho = `Assumptions: ${Math.round(deferredUplift * 100)}% of orders within $${deferredWindow} below the threshold build baskets (Basket-builder only); ${Math.round(deferredAbandon * 100)}% of worse-off orders abandon; COGS ${Math.round((deferredCogs ?? 0) * 100)}%. Deltas are expected values vs the observed current baseline over ${currentFacts?.orderCount ?? 0} orders.`;
 
   return (
     <div className="space-y-8">
@@ -125,23 +191,17 @@ export default function StepProposal({
         upliftRate={upliftRate}
         upliftWindow={upliftWindow}
         abandonRate={abandonRate}
-        echoUpliftRate={deferredUplift}
-        echoUpliftWindow={deferredWindow}
-        echoAbandonRate={deferredAbandon}
-        echoCogsPercent={deferredCogs}
+        assumptionEcho={assumptionEcho}
         onCogsChange={onCogsChange}
         onUpliftRateChange={setUpliftRate}
         onUpliftWindowChange={setUpliftWindow}
         onAbandonRateChange={setAbandonRate}
-        selected={selected}
-        onSelect={setSelected}
-        activeKey={drilldownKey}
       />
 
       <div className="no-print">
         <p className="text-tac-muted mb-4">
           Custom scheme — adjust the fee and free-over threshold per service. It appears as the
-          Custom column above and in the drill-down below.
+          Custom column above and as the Custom option throughout the report below.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {usedTiers.map((t) => (
@@ -182,21 +242,18 @@ export default function StepProposal({
         </div>
       </div>
 
-      {analysis && (
-        <div className="space-y-2">
-          <p className="text-xs text-tac-muted">
-            Drill-down: <strong className="text-tac-accent">{OPTION_LABELS[drilldownKey]}</strong>{" "}
-            — structural comparison at observed cart values. The behaviour assumptions
-            (basket-building, abandonment) apply to the comparison table above, not to these
-            charts.
-          </p>
-          <BenchmarkPanel
-            analysis={analysis}
-            currentScheme={currentScheme}
-            proposedScheme={selectedScheme}
-            monthlyOrders={monthlyOrders}
-          />
-        </div>
+      {behavior && recs && currentFacts && reconciliation && (
+        <ComparisonReport
+          options={reportOptions}
+          currentFacts={currentFacts}
+          currentScheme={currentScheme}
+          reconciliation={reconciliation}
+          curves={curves}
+          grossValues={grossValues}
+          monthlyOrders={monthlyOrders}
+          assumptionEcho={assumptionEcho}
+          customIsCurrent={customIsCurrent}
+        />
       )}
     </div>
   );

@@ -1,25 +1,16 @@
 import { formatCurrency } from "@/lib/calculations";
+import { TierConfig } from "@/lib/shipping-sim/types";
 
-export type Trend = "up" | "down" | "neutral";
+/** Human summary of a standard-tier config: "$9.95, free over $100" / "$9.95 flat" / "—". */
+export function describeStandard(config: TierConfig | undefined): string {
+  if (!config) return "—";
+  return config.freeThreshold === null
+    ? `${formatCurrency(config.fee)} flat`
+    : `${formatCurrency(config.fee)}, free over $${config.freeThreshold}`;
+}
 
-/** Currency string with an explicit leading "+" for non-negative values. */
+/** Currency string with an explicit leading "+" for non-negative values (negative zero normalised). */
 export function signedCurrency(n: number): string {
-  return (n >= 0 ? "+" : "") + formatCurrency(n);
-}
-
-/** A metric where a higher value is better (revenue, profit, recovery). */
-export function goodIfPositive(delta: number): Trend {
-  return delta > 0 ? "up" : delta < 0 ? "down" : "neutral";
-}
-
-/** A metric where a lower value is better (carrier spend, cost). */
-export function goodIfNegative(delta: number): Trend {
-  return delta < 0 ? "up" : delta > 0 ? "down" : "neutral";
-}
-
-/** Direction-aware phrase for a carrier-spend delta (negative = saving). */
-export function carrierSpendSummary(delta: number): string {
-  return delta < 0
-    ? `carrier savings of ${formatCurrency(-delta)}`
-    : `a carrier cost rise of ${formatCurrency(delta)}`;
+  const normalized = n === 0 ? 0 : n; // avoid "+-$0.00" from negative zero
+  return (normalized >= 0 ? "+" : "") + formatCurrency(normalized);
 }

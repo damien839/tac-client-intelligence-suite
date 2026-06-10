@@ -2,15 +2,13 @@
 
 import InputField from "@/components/shared/InputField";
 import {
-  RecommendationId,
   RecommendedScheme,
   Scheme,
   SchemeEvaluation,
-  TierConfig,
 } from "@/lib/shipping-sim/types";
-import { formatCurrency, formatPercent } from "@/lib/calculations";
-
-export type OptionKey = RecommendationId | "custom";
+import { formatPercent } from "@/lib/calculations";
+import { describeStandard, signedCurrency } from "./analysis/format";
+import { OptionKey } from "./report/types";
 
 /** Metric subset shared by RecommendedScheme and SchemeEvaluation. */
 interface OptionMetrics {
@@ -43,37 +41,17 @@ interface OptionsComparisonProps {
   upliftRate: number;
   upliftWindow: number;
   abandonRate: number;
-  /** Deferred values the table metrics were actually computed from — used for the printed echo so caption and numbers stay consistent mid-drag. */
-  echoUpliftRate: number;
-  echoUpliftWindow: number;
-  echoAbandonRate: number;
-  echoCogsPercent: number | undefined;
+  /** Printed assumptions line — built by the parent from the deferred values the table metrics were actually computed from, and shared with the report below. */
+  assumptionEcho: string;
   onCogsChange: (value: number | undefined) => void;
   onUpliftRateChange: (value: number) => void;
   onUpliftWindowChange: (value: number) => void;
   onAbandonRateChange: (value: number) => void;
-  /** Raw selection state — kept for the parent to round-trip via onSelect; the component itself uses activeKey for tab styling. */
-  selected: OptionKey;
-  onSelect: (key: OptionKey) => void;
-  /** The key that actually drives the drill-down — used to style the active tab so a disabled tab is never highlighted. */
-  activeKey: OptionKey;
-}
-
-function signedCurrency(value: number): string {
-  const normalized = value === 0 ? 0 : value; // avoid "+-$0.00" from negative zero
-  return `${normalized >= 0 ? "+" : ""}${formatCurrency(normalized)}`;
 }
 
 /** Fraction -> percent for display, rounded to 0.1 to hide float artifacts (0.55 -> 55, not 55.00000000000001). */
 function toPercent(fraction: number): number {
   return Math.round(fraction * 1000) / 10;
-}
-
-function describeStandard(config: TierConfig | undefined): string {
-  if (!config) return "—";
-  return config.freeThreshold === null
-    ? `${formatCurrency(config.fee)} flat`
-    : `${formatCurrency(config.fee)}, free over $${config.freeThreshold}`;
 }
 
 export default function OptionsComparison({
@@ -87,16 +65,11 @@ export default function OptionsComparison({
   upliftRate,
   upliftWindow,
   abandonRate,
-  echoUpliftRate,
-  echoUpliftWindow,
-  echoAbandonRate,
-  echoCogsPercent,
+  assumptionEcho,
   onCogsChange,
   onUpliftRateChange,
   onUpliftWindowChange,
   onAbandonRateChange,
-  onSelect,
-  activeKey,
 }: OptionsComparisonProps) {
   const columns: OptionColumn[] = [
     {
@@ -175,15 +148,6 @@ export default function OptionsComparison({
           : signedCurrency((m.contributionDelta / orderCount) * monthlyOrders * 12),
       show: monthlyOrders !== undefined,
     },
-  ];
-
-  const assumptionEcho = `Assumptions: ${Math.round(echoUpliftRate * 100)}% of orders within $${echoUpliftWindow} below the threshold build baskets (Basket-builder only); ${Math.round(echoAbandonRate * 100)}% of worse-off orders abandon; COGS ${Math.round((echoCogsPercent ?? 0) * 100)}%. Deltas are expected values vs the observed current baseline over ${orderCount} orders.`;
-
-  const tabs: { key: OptionKey; label: string }[] = [
-    { key: "profit-first", label: "Profit-first" },
-    { key: "threshold-fee", label: "Optimised threshold + fee" },
-    { key: "basket-builder", label: "Basket-builder" },
-    { key: "custom", label: "Custom" },
   ];
 
   return (
@@ -308,26 +272,6 @@ export default function OptionsComparison({
               </p>
             </div>
           )}
-
-          {/* Drill-down selector */}
-          <div className="flex flex-wrap gap-2 no-print">
-            <span className="text-sm text-tac-muted self-center">Drill into:</span>
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                className={`text-sm py-1.5 px-3 rounded-lg border ${
-                  activeKey === tab.key
-                    ? "border-tac-accent text-tac-accent"
-                    : "border-tac-border text-tac-muted hover:border-tac-accent/50"
-                }`}
-                disabled={tab.key !== "custom" && (recs === null || recs.length === 0)}
-                onClick={() => onSelect(tab.key)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
         </>
       )}
     </div>
