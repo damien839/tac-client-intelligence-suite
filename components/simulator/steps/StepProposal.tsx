@@ -3,9 +3,11 @@
 import TierConfigRow from "../TierConfigRow";
 import BenchmarkPanel from "../BenchmarkPanel";
 import InputField from "@/components/shared/InputField";
-import { Analysis, CanonicalTier, Scheme } from "@/lib/shipping-sim/types";
+import RecommendationCards from "../RecommendationCards";
+import { Analysis, CanonicalTier, Scheme, TaggedOrder } from "@/lib/shipping-sim/types";
 
 interface StepProposalProps {
+  orders: TaggedOrder[];
   usedTiers: CanonicalTier[];
   tierVals: Partial<Record<CanonicalTier, { fee: number; freeThreshold: number | null }>>;
   cogsPercent: number | undefined;
@@ -16,9 +18,11 @@ interface StepProposalProps {
   onChange: (tier: CanonicalTier, patch: { fee?: number; freeThreshold?: number | null }) => void;
   onCogsChange: (value: number | undefined) => void;
   onMonthlyOrdersChange: (value: number | undefined) => void;
+  onApply: (patch: { fee: number; freeThreshold: number | null }) => void;
 }
 
 export default function StepProposal({
+  orders,
   usedTiers,
   tierVals,
   cogsPercent,
@@ -29,9 +33,18 @@ export default function StepProposal({
   onChange,
   onCogsChange,
   onMonthlyOrdersChange,
+  onApply,
 }: StepProposalProps) {
   return (
     <div className="space-y-8">
+      <RecommendationCards
+        orders={orders}
+        currentScheme={currentScheme}
+        proposedStandard={tierVals.standard}
+        cogsPercent={cogsPercent}
+        onCogsChange={onCogsChange}
+        onApply={onApply}
+      />
       <div className="no-print">
         <p className="text-tac-muted mb-4">
           Adjust the proposed fee and free-over threshold per service. The analysis below updates live.

@@ -189,6 +189,7 @@ export default function ShippingSimulatorWizard() {
         )}
         {step === 3 && (
           <StepProposal
+            orders={taggedOrders}
             usedTiers={usedTiers}
             tierVals={proposedTiers}
             cogsPercent={cogsPercent}
@@ -201,6 +202,7 @@ export default function ShippingSimulatorWizard() {
             }
             onCogsChange={setCogsPercent}
             onMonthlyOrdersChange={setMonthlyOrders}
+            onApply={(patch) => setProposedTiers((p) => ({ ...p, standard: patch }))}
           />
         )}
 

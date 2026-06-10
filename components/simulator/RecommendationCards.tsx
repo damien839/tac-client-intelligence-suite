@@ -208,6 +208,7 @@ export default function RecommendationCards({
                 )}
 
                 <button
+                  type="button"
                   className="btn-primary mt-auto no-print"
                   disabled={isApplied(rec)}
                   onClick={() => onApply({ fee: rec.fee, freeThreshold: rec.threshold })}
