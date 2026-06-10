@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { bucketOrders, prepareBuckets, behavioralScenario } from "@/lib/shipping-sim/recommend";
-import { proposedScenario } from "@/lib/shipping-sim/model";
+import { bucketOrders, prepareBuckets, behavioralScenario, recommendOptions, thresholdCandidates } from "@/lib/shipping-sim/recommend";
+import { proposedScenario, currentScenario } from "@/lib/shipping-sim/model";
 import { BehaviorParams, CanonicalTier, Scheme, TaggedOrder } from "@/lib/shipping-sim/types";
 
 function o(gross: number, tier: CanonicalTier): TaggedOrder {
@@ -94,6 +94,31 @@ describe("behavioralScenario", () => {
     expect(r.expectedOrdersLost).toBeCloseTo(0.3);
     expect(r.freeOrderShare).toBeCloseTo(0.4 / 0.7); // builders / completing
   });
+
+  it("lands on the cheapest tier when the chosen tier is removed from the candidate", () => {
+    // Express order; candidate drops express entirely -> falls to standard.
+    const candidate: Scheme = {
+      standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 },
+    };
+    const prepared = prepareBuckets(bucketOrders([o(150, "express")]), current);
+    const r = behavioralScenario(prepared, candidate, ZERO);
+    expect(r.shippingRevenue).toBe(0); // 150 >= 100 -> free standard
+    expect(r.carrierSpend).toBe(7); // standard carrier cost, not express
+  });
+
+  it("does not abandon when the landed fee equals the current fee", () => {
+    // Same fee as today -> not worse off -> abandonment must not apply (strict >).
+    const stdOnly: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    const prepared = prepareBuckets(bucketOrders([o(80, "standard")]), stdOnly);
+    const r = behavioralScenario(prepared, stdOnly, {
+      cogsPercent: 0.5,
+      upliftRate: 0,
+      upliftWindow: 20,
+      abandonRate: 1,
+    });
+    expect(r.expectedOrdersLost).toBe(0);
+    expect(r.shippingRevenue).toBe(10);
+  });
 });
 
 describe("bucketOrders", () => {
@@ -117,5 +142,112 @@ describe("bucketOrders", () => {
     const buckets = bucketOrders(orders);
     expect(buckets.length).toBeLessThan(200); // 10..60.01 rounds to ~51 distinct dollar values
     expect(buckets.reduce((s, b) => s + b.count, 0)).toBe(5001);
+  });
+});
+
+describe("thresholdCandidates", () => {
+  it("sweeps $0 to max(400, p95 rounded up to $10) in $10 steps, with null last", () => {
+    const small = thresholdCandidates([o(50, "standard")]);
+    expect(small[0]).toBe(0);
+    expect(small[small.length - 1]).toBeNull();
+    expect(small[small.length - 2]).toBe(400);
+    expect(small).toContain(150); // $10 steps
+
+    const big = thresholdCandidates(Array.from({ length: 20 }, () => o(950, "standard")));
+    expect(big[big.length - 2]).toBe(960); // ceil(950/10)*10, above the 400 floor
+  });
+
+  it("caps the sweep at $1000", () => {
+    const huge = thresholdCandidates(Array.from({ length: 20 }, () => o(5000, "standard")));
+    expect(huge[huge.length - 2]).toBe(1000);
+  });
+});
+
+describe("recommendOptions", () => {
+  const behavior: BehaviorParams = {
+    cogsPercent: 0.4,
+    upliftRate: 0.3,
+    upliftWindow: 20,
+    abandonRate: 0,
+  };
+
+  it("returns [] when the current scheme has no standard tier", () => {
+    const expressOnly: Scheme = {
+      express: { tier: "express", fee: 15, freeThreshold: 200, avgCost: 12 },
+    };
+    expect(recommendOptions([o(80, "express")], expressOnly, behavior)).toEqual([]);
+  });
+
+  it("returns [] when there are no analysable orders", () => {
+    expect(recommendOptions([], current, behavior)).toEqual([]);
+  });
+
+  it("profit-first matches a brute-force sweep of the same candidates (behaviour zeroed)", () => {
+    const orders = [
+      o(80, "standard"),
+      o(150, "standard"),
+      o(150, "express"),
+      o(250, "express"),
+      o(60, "standard"),
+    ];
+    const baseline = currentScenario(orders, current).netShippingProfit;
+    let bestDelta = -Infinity;
+    for (const t of thresholdCandidates(orders)) {
+      const cand: Scheme = {
+        ...current,
+        standard: { ...current.standard!, freeThreshold: t },
+      };
+      const delta = proposedScenario(orders, current, cand).netShippingProfit - baseline;
+      if (delta > bestDelta) bestDelta = delta;
+    }
+    const a = recommendOptions(orders, current, behavior).find((r) => r.id === "profit-first")!;
+    // abandonRate 0 and uplift forced off for profit-first -> contribution = shipping delta
+    expect(a.contributionDelta).toBeCloseTo(bestDelta);
+    expect(a.upliftMarginGain).toBe(0);
+  });
+
+  it("computes the three cards on a single-tier fixture (hand-verified)", () => {
+    // Current: std fee $10, free over $200, cost $7. One order, gross $185 (pays $10 today).
+    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 200, avgCost: 7 } };
+    const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 1, upliftWindow: 20, abandonRate: 0 };
+    const recs = recommendOptions([o(185, "standard")], cur, b);
+    const a = recs.find((r) => r.id === "profit-first")!;
+    const tf = recs.find((r) => r.id === "threshold-fee")!;
+    const bb = recs.find((r) => r.id === "basket-builder")!;
+
+    // A (uplift off): any T <= 180 makes the order free (delta -10); T >= 190 keeps it
+    // paying (delta 0). Ties prefer the lowest threshold -> 190. Charges everyone ->
+    // unconstrained flag (abandonment 0).
+    expect(a.threshold).toBe(190);
+    expect(a.contributionDelta).toBeCloseTo(0);
+    expect(a.unconstrained).toBe(true);
+
+    // B: with no abandonment, revenue is monotone in fee -> pins at maxFee = max(2*10, 30) = 30.
+    expect(tf.fee).toBe(30);
+    expect(tf.threshold).toBe(190);
+    expect(tf.contributionDelta).toBeCloseTo(20); // (30-7) - (10-7)
+    expect(tf.unconstrained).toBe(true);
+
+    // C (uplift on): at T=200 the order (in window [180,200)) builds: loses the $10 fee,
+    // gains (200-185)*0.8 = $12 margin -> delta +2. Beats every paying candidate (0).
+    expect(bb.threshold).toBe(200);
+    expect(bb.contributionDelta).toBeCloseTo(2);
+    expect(bb.upliftMarginGain).toBeCloseTo(12);
+    expect(bb.unconstrained).toBe(false); // optimum is interior, threshold gives free shipping
+  });
+
+  it("does not flag unconstrained when abandonment is set", () => {
+    const orders = [o(80, "standard"), o(150, "standard"), o(170, "standard")];
+    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    const withAbandon: BehaviorParams = {
+      cogsPercent: 0.5,
+      upliftRate: 0,
+      upliftWindow: 20,
+      abandonRate: 0.5,
+    };
+    const a = recommendOptions(orders, cur, withAbandon).find((r) => r.id === "profit-first")!;
+    expect(a.unconstrained).toBe(false);
+    // T=100 (the current scheme) is always a candidate, so the optimum is never negative.
+    expect(a.contributionDelta).toBeGreaterThanOrEqual(0);
   });
 });

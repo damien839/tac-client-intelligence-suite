@@ -5,6 +5,8 @@ import {
   BehaviorParams,
   CanonicalTier,
   OrderBucket,
+  RecommendationId,
+  RecommendedScheme,
   Scheme,
   TaggedOrder,
 } from "./types";
@@ -130,4 +132,124 @@ export function behavioralScenario(
     freeOrderShare: completingOrders > 0 ? freeOrders / completingOrders : 0,
     recoveryRate: carrierSpend > 0 ? shippingRevenue / carrierSpend : 0,
   };
+}
+
+const THRESHOLD_STEP = 10;
+const THRESHOLD_FLOOR = 400; // always sweep at least this far
+const THRESHOLD_CAP = 1000;
+const FEE_STEP = 1;
+const FEE_FLOOR = 30; // fee sweep upper bound: max(2x current fee, this)
+
+/**
+ * Candidate thresholds: $0..max($400, p95 of gross rounded up to $10), capped
+ * at $1000, in $10 steps — plus null (flat, no free shipping) evaluated last so
+ * ties prefer the lowest qualifying threshold.
+ */
+export function thresholdCandidates(orders: TaggedOrder[]): (number | null)[] {
+  const sorted = orders.map((order) => order.gross).sort((a, b) => a - b);
+  const p95 = sorted[Math.floor(0.95 * (sorted.length - 1))] ?? 0;
+  const maxThreshold = Math.min(
+    THRESHOLD_CAP,
+    Math.max(THRESHOLD_FLOOR, (Math.floor(p95 / THRESHOLD_STEP) + 1) * THRESHOLD_STEP)
+  );
+  const candidates: (number | null)[] = [];
+  for (let t = 0; t <= maxThreshold; t += THRESHOLD_STEP) candidates.push(t);
+  candidates.push(null);
+  return candidates;
+}
+
+interface CandidateResult {
+  threshold: number | null;
+  fee: number;
+  result: BehavioralResult;
+  contributionDelta: number;
+}
+
+/**
+ * Run the three recommendation sweeps over the standard tier.
+ * - profit-first: threshold only, uplift forced off
+ * - threshold-fee: threshold x fee grid, uplift forced off
+ * - basket-builder: threshold only, uplift per the caller's params
+ * Abandonment applies to all three. Objective: expected total contribution
+ * delta vs the current scheme (shipping P&L + product-margin effects).
+ */
+export function recommendOptions(
+  orders: TaggedOrder[],
+  current: Scheme,
+  behavior: BehaviorParams
+): RecommendedScheme[] {
+  const std = current.standard;
+  if (!std) return [];
+  const valid = orders.filter((order) => current[order.tier] !== undefined);
+  if (valid.length === 0) return [];
+
+  const prepared = prepareBuckets(bucketOrders(valid), current);
+  const baselineNet = prepared.reduce(
+    (sum, b) => sum + (b.currentFee - current[b.tier]!.avgCost) * b.count,
+    0
+  );
+  const thresholds = thresholdCandidates(valid);
+  const maxFee = Math.max(2 * std.fee, FEE_FLOOR);
+  const noUplift: BehaviorParams = { ...behavior, upliftRate: 0 };
+
+  const evalCandidate = (
+    threshold: number | null,
+    fee: number,
+    params: BehaviorParams
+  ): CandidateResult => {
+    const candidate: Scheme = { ...current, standard: { ...std, fee, freeThreshold: threshold } };
+    const result = behavioralScenario(prepared, candidate, params);
+    return {
+      threshold,
+      fee,
+      result,
+      contributionDelta:
+        result.netShippingProfit - baselineNet + result.upliftMarginGain - result.abandonMarginLoss,
+    };
+  };
+
+  // Strict > keeps the earliest of tied candidates: lowest threshold, lowest fee.
+  const best = (candidates: CandidateResult[]): CandidateResult =>
+    candidates.reduce((acc, c) => (c.contributionDelta > acc.contributionDelta ? c : acc));
+
+  const bestA = best(thresholds.map((t) => evalCandidate(t, std.fee, noUplift)));
+  const grid: CandidateResult[] = [];
+  for (let fee = 0; fee <= maxFee; fee += FEE_STEP) {
+    for (const t of thresholds) grid.push(evalCandidate(t, fee, noUplift));
+  }
+  const bestB = best(grid);
+  const bestC = best(thresholds.map((t) => evalCandidate(t, std.fee, behavior)));
+
+  // Degeneracy guard: with abandonment off, nothing in the model punishes charging
+  // more. Flag optima that charge everyone (no free shipping granted) or pin the
+  // fee at the top of its range.
+  const isUnconstrained = (c: CandidateResult, sweepsFee: boolean): boolean =>
+    behavior.abandonRate === 0 &&
+    (c.threshold === null || c.result.freeOrderShare === 0 || (sweepsFee && c.fee === maxFee));
+
+  const toScheme = (
+    id: RecommendationId,
+    label: string,
+    c: CandidateResult,
+    sweepsFee: boolean
+  ): RecommendedScheme => ({
+    id,
+    label,
+    threshold: c.threshold,
+    fee: c.fee,
+    contributionDelta: c.contributionDelta,
+    netShippingProfitDelta: c.result.netShippingProfit - baselineNet,
+    upliftMarginGain: c.result.upliftMarginGain,
+    abandonMarginLoss: c.result.abandonMarginLoss,
+    freeOrderShare: c.result.freeOrderShare,
+    recoveryRate: c.result.recoveryRate,
+    expectedOrdersLost: c.result.expectedOrdersLost,
+    unconstrained: isUnconstrained(c, sweepsFee),
+  });
+
+  return [
+    toScheme("profit-first", "Profit-first", bestA, false),
+    toScheme("threshold-fee", "Optimised threshold + fee", bestB, true),
+    toScheme("basket-builder", "Basket-builder", bestC, false),
+  ];
 }
