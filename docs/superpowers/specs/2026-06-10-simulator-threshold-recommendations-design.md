@@ -152,6 +152,13 @@ The comparison table is now driven by the same per-option `ReportOption`/`Scheme
 
 **5. Revealed-preference guard on uplift.** Basket-building only applies where the candidate creates a NEW window — orders already within the uplift window of their current tier's threshold demonstrably didn't build, so they're excluded. Guarantees evaluating the current scheme against itself is a strict no-op under any behaviour settings.
 
+## v3.2 — dominant-tier optimisation + no-op badges (2026-06-10, after Damo's second real-data run)
+
+Real data: 80% of orders ship express at $60 flat; standard (the only tier the optimizer touched) is mostly free already and genuinely sits at a local optimum — so all three recommendations resolved to the current scheme and every column was identical, with no explanation in the table. Decisions:
+
+1. **Optimize the dominant paid tier.** The three sweeps target whichever used tier has the most PAID orders under the current scheme (`dominantPaidTier()` — most orders with `currentFee > 0`; tie or all-free falls back to most total volume, then canonical order). All sweep mechanics are unchanged, just applied to that tier's fee/threshold; other tiers stay at current. `RecommendedScheme` gains `tier: CanonicalTier`. `thresholdCurves` sweeps the same tier. The UI states which service the recommendations re-price (table explainer, footnote, sensitivity caption, AOV markers); the old "no standard tier" edge becomes "no analysable paid tier".
+2. **No-op badge.** When an option's recommended config equals the current scheme's config for the optimised tier, its column header shows an "= current" badge (title: already optimal under these assumptions) and the scheme row reads as unchanged. The verdict's keep-current branch continues to carry the narrative.
+
 ### v1 UI (superseded, kept for history)
 
 Three cards with one-click Apply writing into the proposal inputs; "applied" state on the matching card. Replaced because applying mutated the single report instead of presenting the three options side by side.
