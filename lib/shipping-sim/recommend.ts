@@ -8,6 +8,7 @@ import {
   RecommendationId,
   RecommendedScheme,
   Scheme,
+  SchemeEvaluation,
   TaggedOrder,
 } from "./types";
 
@@ -134,6 +135,13 @@ export function behavioralScenario(
   };
 }
 
+function baselineNetOf(prepared: PreparedBucket[], current: Scheme): number {
+  return prepared.reduce(
+    (sum, b) => sum + (b.currentFee - current[b.tier]!.avgCost) * b.count,
+    0
+  );
+}
+
 const THRESHOLD_STEP = 10;
 const THRESHOLD_FLOOR = 400; // always sweep at least this far
 const THRESHOLD_CAP = 1000;
@@ -184,10 +192,7 @@ export function recommendOptions(
   if (valid.length === 0) return [];
 
   const prepared = prepareBuckets(bucketOrders(valid), current);
-  const baselineNet = prepared.reduce(
-    (sum, b) => sum + (b.currentFee - current[b.tier]!.avgCost) * b.count,
-    0
-  );
+  const baselineNet = baselineNetOf(prepared, current);
   const thresholds = thresholdCandidates(valid);
   const maxFee = Math.ceil(Math.max(2 * std.fee, FEE_FLOOR));
   // null is always last; the numeric cap is the second-to-last entry.
@@ -258,4 +263,32 @@ export function recommendOptions(
     toScheme("threshold-fee", "Optimised threshold + fee", bestB, true),
     toScheme("basket-builder", "Basket-builder", bestC, false),
   ];
+}
+
+/**
+ * Evaluate one candidate scheme under the behavioural model — the same metrics
+ * recommendOptions reports for its winners, for any caller-supplied scheme.
+ */
+export function evaluateScheme(
+  orders: TaggedOrder[],
+  current: Scheme,
+  candidate: Scheme,
+  behavior: BehaviorParams
+): SchemeEvaluation | null {
+  const valid = orders.filter((order) => current[order.tier] !== undefined);
+  if (valid.length === 0) return null;
+  const prepared = prepareBuckets(bucketOrders(valid), current);
+  const baselineNet = baselineNetOf(prepared, current);
+  const result = behavioralScenario(prepared, candidate, behavior);
+  return {
+    contributionDelta:
+      result.netShippingProfit - baselineNet + result.upliftMarginGain - result.abandonMarginLoss,
+    netShippingProfitDelta: result.netShippingProfit - baselineNet,
+    upliftMarginGain: result.upliftMarginGain,
+    abandonMarginLoss: result.abandonMarginLoss,
+    expectedOrdersLost: result.expectedOrdersLost,
+    freeOrderShare: result.freeOrderShare,
+    recoveryRate: result.recoveryRate,
+    orderCount: valid.length,
+  };
 }

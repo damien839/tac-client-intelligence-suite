@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bucketOrders, prepareBuckets, behavioralScenario, recommendOptions, thresholdCandidates } from "@/lib/shipping-sim/recommend";
+import { bucketOrders, prepareBuckets, behavioralScenario, recommendOptions, thresholdCandidates, evaluateScheme } from "@/lib/shipping-sim/recommend";
 import { proposedScenario, currentScenario } from "@/lib/shipping-sim/model";
 import { BehaviorParams, CanonicalTier, Scheme, TaggedOrder } from "@/lib/shipping-sim/types";
 
@@ -292,5 +292,51 @@ describe("recommendOptions", () => {
     )!;
     expect(a.contributionDelta).toBe(0);
     expect(a.netShippingProfitDelta).toBe(0);
+  });
+});
+
+describe("evaluateScheme", () => {
+  const behavior: BehaviorParams = { cogsPercent: 0.4, upliftRate: 0, upliftWindow: 20, abandonRate: 0.1 };
+
+  it("returns null when there are no analysable orders", () => {
+    expect(evaluateScheme([], current, current, behavior)).toBeNull();
+    expect(evaluateScheme([o(80, "nextday")], current, current, behavior)).toBeNull();
+  });
+
+  it("evaluating the current scheme against itself yields zero deltas", () => {
+    const orders = [o(80, "standard"), o(150, "standard"), o(150, "express")];
+    const e = evaluateScheme(orders, current, current, behavior)!;
+    expect(e.contributionDelta).toBeCloseTo(0);
+    expect(e.netShippingProfitDelta).toBeCloseTo(0);
+    // uplift is 0 because upliftRate is 0
+    expect(e.upliftMarginGain).toBe(0);
+    // abandonment is 0 because no order is worse off vs current
+    expect(e.abandonMarginLoss).toBe(0);
+    expect(e.expectedOrdersLost).toBe(0);
+    expect(e.orderCount).toBe(3);
+  });
+
+  it("matches the recommendOptions metrics for the same candidate scheme", () => {
+    const orders = [
+      o(80, "standard"),
+      o(150, "standard"),
+      o(150, "express"),
+      o(250, "express"),
+      o(60, "standard"),
+    ];
+    const b: BehaviorParams = { cogsPercent: 0.4, upliftRate: 0.3, upliftWindow: 20, abandonRate: 0.1 };
+    const bb = recommendOptions(orders, current, b).find((r) => r.id === "basket-builder")!;
+    const candidate: Scheme = {
+      ...current,
+      standard: { ...current.standard!, fee: bb.fee, freeThreshold: bb.threshold },
+    };
+    const e = evaluateScheme(orders, current, candidate, b)!;
+    expect(e.contributionDelta).toBeCloseTo(bb.contributionDelta);
+    expect(e.netShippingProfitDelta).toBeCloseTo(bb.netShippingProfitDelta);
+    expect(e.upliftMarginGain).toBeCloseTo(bb.upliftMarginGain);
+    expect(e.abandonMarginLoss).toBeCloseTo(bb.abandonMarginLoss);
+    expect(e.expectedOrdersLost).toBeCloseTo(bb.expectedOrdersLost);
+    expect(e.freeOrderShare).toBeCloseTo(bb.freeOrderShare);
+    expect(e.recoveryRate).toBeCloseTo(bb.recoveryRate);
   });
 });

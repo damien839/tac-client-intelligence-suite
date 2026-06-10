@@ -136,6 +136,18 @@ export interface BehavioralResult {
 
 export type RecommendationId = "profit-first" | "threshold-fee" | "basket-builder";
 
+/** Behavioural metrics for one arbitrary candidate scheme (used for the Custom comparison column). */
+export interface SchemeEvaluation {
+  contributionDelta: number;
+  netShippingProfitDelta: number;
+  upliftMarginGain: number;
+  abandonMarginLoss: number;
+  expectedOrdersLost: number;
+  freeOrderShare: number;
+  recoveryRate: number;
+  orderCount: number; // analysable orders the evaluation covers
+}
+
 /** One recommendation card. */
 export interface RecommendedScheme {
   id: RecommendationId;
