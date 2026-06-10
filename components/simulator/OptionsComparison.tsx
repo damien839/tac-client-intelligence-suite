@@ -43,12 +43,20 @@ interface OptionsComparisonProps {
   upliftRate: number;
   upliftWindow: number;
   abandonRate: number;
+  /** Deferred values the table metrics were actually computed from — used for the printed echo so caption and numbers stay consistent mid-drag. */
+  echoUpliftRate: number;
+  echoUpliftWindow: number;
+  echoAbandonRate: number;
+  echoCogsPercent: number | undefined;
   onCogsChange: (value: number | undefined) => void;
   onUpliftRateChange: (value: number) => void;
   onUpliftWindowChange: (value: number) => void;
   onAbandonRateChange: (value: number) => void;
+  /** Raw selection state — kept for the parent to round-trip via onSelect; the component itself uses activeKey for tab styling. */
   selected: OptionKey;
   onSelect: (key: OptionKey) => void;
+  /** The key that actually drives the drill-down — used to style the active tab so a disabled tab is never highlighted. */
+  activeKey: OptionKey;
 }
 
 function signedCurrency(value: number): string {
@@ -79,12 +87,16 @@ export default function OptionsComparison({
   upliftRate,
   upliftWindow,
   abandonRate,
+  echoUpliftRate,
+  echoUpliftWindow,
+  echoAbandonRate,
+  echoCogsPercent,
   onCogsChange,
   onUpliftRateChange,
   onUpliftWindowChange,
   onAbandonRateChange,
-  selected,
   onSelect,
+  activeKey,
 }: OptionsComparisonProps) {
   const columns: OptionColumn[] = [
     {
@@ -97,11 +109,8 @@ export default function OptionsComparison({
     ...(recs ?? []).map((rec) => ({
       key: rec.id as OptionKey,
       label: rec.label,
-      schemeSummary:
-        rec.threshold === null
-          ? `${formatCurrency(rec.fee)} flat`
-          : `${formatCurrency(rec.fee)}, free over $${rec.threshold}`,
-      metrics: rec as OptionMetrics,
+      schemeSummary: describeStandard({ tier: "standard", fee: rec.fee, freeThreshold: rec.threshold, avgCost: 0 }),
+      metrics: rec,
       unconstrained: rec.unconstrained,
     })),
     {
@@ -119,10 +128,12 @@ export default function OptionsComparison({
     label: string;
     render: (m: OptionMetrics, isBaseline: boolean) => string;
     show?: boolean;
+    emphasize?: boolean;
   }[] = [
     {
       label: "Δ total contribution",
       render: (m, base) => (base ? "—" : signedCurrency(m.contributionDelta)),
+      emphasize: true,
     },
     {
       label: "Δ net shipping profit",
@@ -166,7 +177,7 @@ export default function OptionsComparison({
     },
   ];
 
-  const assumptionEcho = `Assumptions: ${Math.round(upliftRate * 100)}% of orders within $${upliftWindow} below the threshold build baskets (Basket-builder only); ${Math.round(abandonRate * 100)}% of worse-off orders abandon; COGS ${Math.round((cogsPercent ?? 0) * 100)}%. Deltas are expected values vs the observed current baseline over ${orderCount} orders.`;
+  const assumptionEcho = `Assumptions: ${Math.round(echoUpliftRate * 100)}% of orders within $${echoUpliftWindow} below the threshold build baskets (Basket-builder only); ${Math.round(echoAbandonRate * 100)}% of worse-off orders abandon; COGS ${Math.round((echoCogsPercent ?? 0) * 100)}%. Deltas are expected values vs the observed current baseline over ${orderCount} orders.`;
 
   const tabs: { key: OptionKey; label: string }[] = [
     { key: "profit-first", label: "Profit-first" },
@@ -268,7 +279,7 @@ export default function OptionsComparison({
                         <td
                           key={col.key}
                           className={`text-right py-2 px-3 ${
-                            row.label === "Δ total contribution" && !col.isBaseline
+                            row.emphasize && !col.isBaseline
                               ? "font-semibold text-tac-accent"
                               : ""
                           }`}
@@ -289,6 +300,15 @@ export default function OptionsComparison({
             )}
           </div>
 
+          {recs !== null && recs.length === 0 && (
+            <div className="card no-print">
+              <p className="text-sm text-tac-muted">
+                Recommendations target the standard free-over line — map a service to Standard to
+                enable the three recommended options. The table compares Current vs Custom only.
+              </p>
+            </div>
+          )}
+
           {/* Drill-down selector */}
           <div className="flex flex-wrap gap-2 no-print">
             <span className="text-sm text-tac-muted self-center">Drill into:</span>
@@ -297,7 +317,7 @@ export default function OptionsComparison({
                 key={tab.key}
                 type="button"
                 className={`text-sm py-1.5 px-3 rounded-lg border ${
-                  selected === tab.key
+                  activeKey === tab.key
                     ? "border-tac-accent text-tac-accent"
                     : "border-tac-border text-tac-muted hover:border-tac-accent/50"
                 }`}

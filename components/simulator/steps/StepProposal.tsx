@@ -90,28 +90,27 @@ export default function StepProposal({
     [orders, currentScheme, behavior]
   );
 
-  // Scheme behind the selected drill-down tab. Falls back to the Custom scheme
-  // when recommendations are unavailable (COGS unset / no standard tier).
-  const selectedScheme = useMemo<Scheme>(() => {
-    if (selected !== "custom" && recs && currentScheme.standard) {
-      const rec = recs.find((r) => r.id === selected);
-      if (rec) {
-        return {
-          ...currentScheme,
-          standard: { ...currentScheme.standard, fee: rec.fee, freeThreshold: rec.threshold },
-        };
-      }
-    }
-    return proposedScheme;
-  }, [selected, recs, currentScheme, proposedScheme]);
+  // Scheme for the selected REC tab (null when custom / recs unavailable).
+  // Memoized separately so Custom keystrokes don't change its identity.
+  const recScheme = useMemo<Scheme | null>(() => {
+    if (selected === "custom" || !recs || !currentScheme.standard) return null;
+    const rec = recs.find((r) => r.id === selected);
+    if (!rec) return null;
+    return {
+      ...currentScheme,
+      standard: { ...currentScheme.standard, fee: rec.fee, freeThreshold: rec.threshold },
+    };
+  }, [selected, recs, currentScheme]);
 
-  const drilldownKey: OptionKey =
-    selected !== "custom" && recs && recs.some((r) => r.id === selected) ? selected : "custom";
+  const selectedScheme = recScheme ?? proposedScheme;
+
+  // recScheme is non-null exactly when a rec tab is active.
+  const drilldownKey: OptionKey = recScheme ? selected : "custom";
 
   const analysis = useMemo(() => {
     if (orders.length === 0 || usedTiers.length === 0) return null;
-    return analyze(orders, currentScheme, selectedScheme, { cogsPercent });
-  }, [orders, usedTiers, currentScheme, selectedScheme, cogsPercent]);
+    return analyze(orders, currentScheme, selectedScheme, { cogsPercent: deferredCogs });
+  }, [orders, usedTiers, currentScheme, selectedScheme, deferredCogs]);
 
   return (
     <div className="space-y-8">
@@ -126,12 +125,17 @@ export default function StepProposal({
         upliftRate={upliftRate}
         upliftWindow={upliftWindow}
         abandonRate={abandonRate}
+        echoUpliftRate={deferredUplift}
+        echoUpliftWindow={deferredWindow}
+        echoAbandonRate={deferredAbandon}
+        echoCogsPercent={deferredCogs}
         onCogsChange={onCogsChange}
         onUpliftRateChange={setUpliftRate}
         onUpliftWindowChange={setUpliftWindow}
         onAbandonRateChange={setAbandonRate}
         selected={selected}
         onSelect={setSelected}
+        activeKey={drilldownKey}
       />
 
       <div className="no-print">
