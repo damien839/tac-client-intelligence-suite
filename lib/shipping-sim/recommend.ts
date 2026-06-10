@@ -10,6 +10,7 @@ import {
   Scheme,
   SchemeEvaluation,
   TaggedOrder,
+  ThresholdCurvePoint,
 } from "./types";
 
 /** Above this many distinct (tier, gross) pairs, gross is rounded to the dollar. */
@@ -75,6 +76,22 @@ export function prepareBuckets(buckets: OrderBucket[], current: Scheme): Prepare
  *    current fee) abandon with weight abandonRate — lose product margin.
  * 4. The rest pay the landed fee.
  */
+/**
+ * Expected-value outcome of one candidate scheme. Per bucket:
+ * 1. Land via revealed-WTP (same rule as landedTier, using the cached premium).
+ * 2. Basket-building: in-window paying orders build to the threshold with
+ *    weight upliftRate — ship free, carrier cost unchanged, gain product margin.
+ * 3. Abandonment: of the remaining weight, worse-off orders (landed fee above
+ *    current fee) abandon with weight abandonRate — lose product margin.
+ * 4. The rest pay the landed fee.
+ *
+ * impact counts — EV-weighted, scaled by bucket.count:
+ * - builders: basket-building weight (separate mechanism from newlyFree)
+ * - switchedTier: completing weight landing on a different tier than the bucket's chosen tier
+ * - newlyPaying: completing payers whose landed fee > 0 and current fee was 0
+ * - newlyFree: completing payers whose landed fee === 0 and current fee was > 0
+ *   (builders are NOT included — each count captures its own mechanism)
+ */
 export function behavioralScenario(
   buckets: PreparedBucket[],
   candidate: Scheme,
@@ -88,6 +105,10 @@ export function behavioralScenario(
   let expectedOrdersLost = 0;
   let freeOrders = 0;
   let completingOrders = 0;
+  let impactNewlyPaying = 0;
+  let impactNewlyFree = 0;
+  let impactBuilders = 0;
+  let impactSwitchedTier = 0;
 
   for (const bucket of buckets) {
     const cheapest = cheapestTier(candidate, bucket.gross);
@@ -121,6 +142,18 @@ export function behavioralScenario(
     expectedOrdersLost += abandonWeight * bucket.count;
     freeOrders += (buildWeight + (landedFee === 0 ? payWeight : 0)) * bucket.count;
     completingOrders += (buildWeight + payWeight) * bucket.count;
+
+    // Impact counts (EV-weighted, completing payers only for newlyPaying/newlyFree)
+    impactBuilders += buildWeight * bucket.count;
+    if (landed !== bucket.tier) {
+      impactSwitchedTier += (buildWeight + payWeight) * bucket.count;
+    }
+    if (landedFee > 0 && bucket.currentFee === 0) {
+      impactNewlyPaying += payWeight * bucket.count;
+    }
+    if (landedFee === 0 && bucket.currentFee > 0) {
+      impactNewlyFree += payWeight * bucket.count;
+    }
   }
 
   return {
@@ -132,6 +165,12 @@ export function behavioralScenario(
     expectedOrdersLost,
     freeOrderShare: completingOrders > 0 ? freeOrders / completingOrders : 0,
     recoveryRate: carrierSpend > 0 ? shippingRevenue / carrierSpend : 0,
+    impact: {
+      newlyPaying: impactNewlyPaying,
+      newlyFree: impactNewlyFree,
+      builders: impactBuilders,
+      switchedTier: impactSwitchedTier,
+    },
   };
 }
 
@@ -284,11 +323,48 @@ export function evaluateScheme(
     contributionDelta:
       result.netShippingProfit - baselineNet + result.upliftMarginGain - result.abandonMarginLoss,
     netShippingProfitDelta: result.netShippingProfit - baselineNet,
+    shippingRevenue: result.shippingRevenue,
+    carrierSpend: result.carrierSpend,
+    netShippingProfit: result.netShippingProfit,
     upliftMarginGain: result.upliftMarginGain,
     abandonMarginLoss: result.abandonMarginLoss,
     expectedOrdersLost: result.expectedOrdersLost,
     freeOrderShare: result.freeOrderShare,
     recoveryRate: result.recoveryRate,
     orderCount: valid.length,
+    impact: result.impact,
   };
+}
+
+/**
+ * Contribution-vs-threshold curves for the sensitivity chart: the standard
+ * free-over threshold sweeps the numeric candidates (fee held at current),
+ * evaluated with basket-building off and on. Abandonment per the caller.
+ */
+export function thresholdCurves(
+  orders: TaggedOrder[],
+  current: Scheme,
+  behavior: BehaviorParams
+): ThresholdCurvePoint[] {
+  const std = current.standard;
+  if (!std) return [];
+  const valid = orders.filter((order) => current[order.tier] !== undefined);
+  if (valid.length === 0) return [];
+  const prepared = prepareBuckets(bucketOrders(valid), current);
+  const baselineNet = baselineNetOf(prepared, current);
+  const noUplift: BehaviorParams = { ...behavior, upliftRate: 0 };
+  const contribution = (candidate: Scheme, params: BehaviorParams): number => {
+    const r = behavioralScenario(prepared, candidate, params);
+    return r.netShippingProfit - baselineNet + r.upliftMarginGain - r.abandonMarginLoss;
+  };
+  return thresholdCandidates(valid)
+    .filter((t): t is number => t !== null)
+    .map((threshold) => {
+      const candidate: Scheme = { ...current, standard: { ...std, freeThreshold: threshold } };
+      return {
+        threshold,
+        contributionNoUplift: contribution(candidate, noUplift),
+        contributionWithUplift: contribution(candidate, behavior),
+      };
+    });
 }

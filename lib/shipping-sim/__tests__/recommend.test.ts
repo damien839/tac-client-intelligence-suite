@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bucketOrders, prepareBuckets, behavioralScenario, recommendOptions, thresholdCandidates, evaluateScheme } from "@/lib/shipping-sim/recommend";
+import { bucketOrders, prepareBuckets, behavioralScenario, recommendOptions, thresholdCandidates, evaluateScheme, thresholdCurves } from "@/lib/shipping-sim/recommend";
 import { proposedScenario, currentScenario } from "@/lib/shipping-sim/model";
 import { BehaviorParams, CanonicalTier, Scheme, TaggedOrder } from "@/lib/shipping-sim/types";
 
@@ -338,5 +338,82 @@ describe("evaluateScheme", () => {
     expect(e.expectedOrdersLost).toBeCloseTo(bb.expectedOrdersLost);
     expect(e.freeOrderShare).toBeCloseTo(bb.freeOrderShare);
     expect(e.recoveryRate).toBeCloseTo(bb.recoveryRate);
+  });
+
+  it("exposes EV absolutes and impact counts", () => {
+    const orders = [o(80, "standard"), o(150, "standard")];
+    const e = evaluateScheme(orders, current, current, ZERO)!;
+    expect(e.shippingRevenue).toBeCloseTo(10); // 80 pays 10, 150 free
+    expect(e.carrierSpend).toBeCloseTo(14);
+    expect(e.netShippingProfit).toBeCloseTo(e.shippingRevenue - e.carrierSpend);
+    expect(e.impact).toEqual({ newlyPaying: 0, newlyFree: 0, builders: 0, switchedTier: 0 });
+  });
+});
+
+describe("behavioralScenario impact counts", () => {
+  it("counts newly-paying orders (free under current, paying under candidate)", () => {
+    // gross 150: free under current std T100; candidate raises T to 200 -> pays $10. abandon 0.2.
+    const stdOnly: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    const candidate: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 200, avgCost: 7 } };
+    const prepared = prepareBuckets(bucketOrders([o(150, "standard")]), stdOnly);
+    const r = behavioralScenario(prepared, candidate, { cogsPercent: 0.5, upliftRate: 0, upliftWindow: 20, abandonRate: 0.2 });
+    expect(r.impact.newlyPaying).toBeCloseTo(0.8); // 0.2 abandoned, 0.8 pay
+    expect(r.impact.newlyFree).toBe(0);
+    expect(r.impact.builders).toBe(0);
+    expect(r.impact.switchedTier).toBe(0);
+  });
+
+  it("counts newly-free orders and builders separately", () => {
+    // gross 80 pays $10 under current; candidate lowers T to 50 -> ships free: newlyFree 1.
+    const stdOnly: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    const lowT: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 50, avgCost: 7 } };
+    const free = behavioralScenario(prepareBuckets(bucketOrders([o(80, "standard")]), stdOnly), lowT, ZERO);
+    expect(free.impact.newlyFree).toBe(1);
+    expect(free.impact.builders).toBe(0);
+
+    // gross 90, candidate = current, uplift 0.5: builders 0.5; the paying half is NOT newly free.
+    const r = behavioralScenario(prepareBuckets(bucketOrders([o(90, "standard")]), stdOnly), stdOnly, {
+      cogsPercent: 0.4, upliftRate: 0.5, upliftWindow: 20, abandonRate: 0,
+    });
+    expect(r.impact.builders).toBeCloseTo(0.5);
+    expect(r.impact.newlyFree).toBe(0);
+    expect(r.impact.newlyPaying).toBe(0);
+  });
+
+  it("counts tier switches", () => {
+    // Express order, candidate drops express -> lands standard (free at 150): switchedTier 1.
+    const candidate: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    const r = behavioralScenario(prepareBuckets(bucketOrders([o(150, "express")]), current), candidate, ZERO);
+    expect(r.impact.switchedTier).toBe(1);
+    // Under current, express at gross 150 < 200 -> fee 15 > 0; candidate standard free at 150 -> landedFee 0 -> newlyFree 1.
+    expect(r.impact.newlyFree).toBe(1);
+  });
+});
+
+describe("thresholdCurves", () => {
+  it("returns one point per numeric threshold candidate and zero delta at the current threshold", () => {
+    const orders = [o(80, "standard"), o(150, "standard")];
+    const b: BehaviorParams = { cogsPercent: 0.4, upliftRate: 0.3, upliftWindow: 20, abandonRate: 0.1 };
+    const curves = thresholdCurves(orders, current, b);
+    const numeric = thresholdCandidates(orders).filter((t) => t !== null);
+    expect(curves).toHaveLength(numeric.length);
+    // At the current threshold (100) with uplift OFF, the candidate equals the current scheme -> delta 0.
+    const at100 = curves.find((p) => p.threshold === 100)!;
+    expect(at100.contributionNoUplift).toBeCloseTo(0);
+  });
+
+  it("matches evaluateScheme at the same candidate", () => {
+    const orders = [o(80, "standard"), o(150, "standard"), o(150, "express")];
+    const b: BehaviorParams = { cogsPercent: 0.4, upliftRate: 0.5, upliftWindow: 20, abandonRate: 0.1 };
+    const curves = thresholdCurves(orders, current, b);
+    const at200 = curves.find((p) => p.threshold === 200)!;
+    const candidate: Scheme = { ...current, standard: { ...current.standard!, freeThreshold: 200 } };
+    expect(at200.contributionWithUplift).toBeCloseTo(evaluateScheme(orders, current, candidate, b)!.contributionDelta);
+  });
+
+  it("returns [] without a standard tier or analysable orders", () => {
+    expect(thresholdCurves([], current, ZERO)).toEqual([]);
+    const expressOnly: Scheme = { express: { tier: "express", fee: 15, freeThreshold: 200, avgCost: 12 } };
+    expect(thresholdCurves([o(80, "express")], expressOnly, ZERO)).toEqual([]);
   });
 });

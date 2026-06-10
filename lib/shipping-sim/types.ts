@@ -132,6 +132,18 @@ export interface BehavioralResult {
   expectedOrdersLost: number; // abandonment, in (fractional) orders
   freeOrderShare: number; // 0..1 of completing orders that ship free
   recoveryRate: number; // shippingRevenue / carrierSpend (0 when spend is 0)
+  /**
+   * EV-weighted order counts describing how the candidate moves orders vs current.
+   * Builders are NOT included in newlyFree — each count captures its own mechanism
+   * (builders are in-window orders that build baskets; newlyFree are completing payers
+   * whose fee dropped to zero).
+   */
+  impact: {
+    newlyPaying: number; // paid $0 under current, pays >$0 under candidate (completing payers only)
+    newlyFree: number; // paid >$0 under current, ships $0 under candidate (completing payers only — builders counted separately)
+    builders: number; // basket-building weight
+    switchedTier: number; // completing weight landing on a different tier than chosen
+  };
 }
 
 export type RecommendationId = "profit-first" | "threshold-fee" | "basket-builder";
@@ -140,12 +152,22 @@ export type RecommendationId = "profit-first" | "threshold-fee" | "basket-builde
 export interface SchemeEvaluation {
   contributionDelta: number;
   netShippingProfitDelta: number;
+  shippingRevenue: number;
+  carrierSpend: number;
+  netShippingProfit: number;
   upliftMarginGain: number;
   abandonMarginLoss: number;
   expectedOrdersLost: number;
   freeOrderShare: number;
   recoveryRate: number;
   orderCount: number; // analysable orders the evaluation covers
+  impact: BehavioralResult["impact"];
+}
+
+export interface ThresholdCurvePoint {
+  threshold: number;
+  contributionNoUplift: number; // Δ total contribution vs current, basket-building off
+  contributionWithUplift: number; // same, basket-building per the caller's params
 }
 
 /** One recommendation card. */
