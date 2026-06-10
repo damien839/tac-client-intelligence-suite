@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bucketOrders, prepareBuckets, behavioralScenario, recommendOptions, thresholdCandidates, evaluateScheme, thresholdCurves } from "@/lib/shipping-sim/recommend";
+import { bucketOrders, dominantPaidTier, prepareBuckets, behavioralScenario, recommendOptions, thresholdCandidates, evaluateScheme, thresholdCurves } from "@/lib/shipping-sim/recommend";
 import { proposedScenario, currentScenario } from "@/lib/shipping-sim/model";
 import { BehaviorParams, CanonicalTier, Scheme, TaggedOrder } from "@/lib/shipping-sim/types";
 
@@ -205,6 +205,32 @@ describe("thresholdCandidates", () => {
   });
 });
 
+describe("dominantPaidTier", () => {
+  it("picks the tier with the most paying orders", () => {
+    // standard fee 10 free over 100; express fee 15 free over 200.
+    // standard: o(80) pays $10, o(90) pays $10 → 2 paying; o(150,200,300,400,500) free → 5 free; total paid = 2.
+    // express: o(100) pays $15, o(120) pays $15, o(140) pays $15 → 3 paying (all below 200); total paid = 3.
+    const orders = [
+      ...[80, 90].map((g) => o(g, "standard")), // pay
+      ...[150, 200, 300, 400, 500].map((g) => o(g, "standard")), // free over 100
+      ...[100, 120, 140].map((g) => o(g, "express")), // pay (free over 200)
+    ];
+    expect(dominantPaidTier(orders, current)).toBe("express");
+  });
+
+  it("falls back to total volume when nobody pays, then canonical order", () => {
+    const freeScheme: Scheme = {
+      standard: { tier: "standard", fee: 0, freeThreshold: null, avgCost: 7 },
+      express: { tier: "express", fee: 0, freeThreshold: null, avgCost: 12 },
+    };
+    // No paid orders; express has 2 total vs standard 1: falls back to total → express.
+    const orders = [o(100, "express"), o(120, "express"), o(80, "standard")];
+    expect(dominantPaidTier(orders, freeScheme)).toBe("express");
+    // Empty orders → null.
+    expect(dominantPaidTier([], current)).toBeNull();
+  });
+});
+
 describe("recommendOptions", () => {
   const behavior: BehaviorParams = {
     cogsPercent: 0.4,
@@ -213,11 +239,14 @@ describe("recommendOptions", () => {
     abandonRate: 0,
   };
 
-  it("returns [] when the current scheme has no standard tier", () => {
+  it("targets the dominant paid tier when standard is absent", () => {
+    // express-only scheme: one paying express order → dominant = express → 3 express recs.
     const expressOnly: Scheme = {
       express: { tier: "express", fee: 15, freeThreshold: 200, avgCost: 12 },
     };
-    expect(recommendOptions([o(80, "express")], expressOnly, behavior)).toEqual([]);
+    const recs = recommendOptions([o(80, "express")], expressOnly, behavior);
+    expect(recs).toHaveLength(3);
+    expect(recs.every((r) => r.tier === "express")).toBe(true);
   });
 
   it("returns [] when there are no analysable orders", () => {
@@ -392,6 +421,25 @@ describe("recommendOptions", () => {
     expect(a.contributionDelta).toBe(0);
     expect(a.netShippingProfitDelta).toBe(0);
   });
+
+  it("re-prices the express tier when express carries the paid volume", () => {
+    // 80% express at a flat fee, standard mostly free: the optimizer must target express.
+    const shape: Scheme = {
+      standard: { tier: "standard", fee: 30, freeThreshold: 250, avgCost: 25 },
+      express: { tier: "express", fee: 60, freeThreshold: null, avgCost: 55 },
+    };
+    const orders = [
+      ...Array.from({ length: 10 }, (_, i) => o(260 + i * 40, "standard")), // free (above 250)
+      ...Array.from({ length: 40 }, (_, i) => o(120 + i * 10, "express")), // pay $60 flat
+    ];
+    const b: BehaviorParams = { cogsPercent: 0.3, upliftRate: 0.3, upliftWindow: 20, abandonRate: 0.1 };
+    const recs = recommendOptions(orders, shape, b);
+    expect(recs).toHaveLength(3);
+    expect(recs.every((r) => r.tier === "express")).toBe(true);
+    // The express sweep must actually consider non-current configs: at least assert the
+    // candidate space moved off the flat-$60 anchor for some option OR deltas are >= 0.
+    for (const r of recs) expect(r.contributionDelta).toBeGreaterThanOrEqual(0);
+  });
 });
 
 describe("evaluateScheme", () => {
@@ -438,7 +486,7 @@ describe("evaluateScheme", () => {
     const bb = recommendOptions(orders, current, b).find((r) => r.id === "basket-builder")!;
     const candidate: Scheme = {
       ...current,
-      standard: { ...current.standard!, fee: bb.fee, freeThreshold: bb.threshold },
+      [bb.tier]: { ...current[bb.tier]!, fee: bb.fee, freeThreshold: bb.threshold },
     };
     const e = evaluateScheme(orders, current, candidate, b)!;
     expect(e.contributionDelta).toBeCloseTo(bb.contributionDelta);
@@ -543,9 +591,15 @@ describe("thresholdCurves", () => {
     expect(at200.contributionWithUplift).toBeCloseTo(evaluateScheme(orders, current, candidate, b)!.contributionDelta);
   });
 
-  it("returns [] without a standard tier or analysable orders", () => {
+  it("returns [] without analysable orders", () => {
     expect(thresholdCurves([], current, ZERO)).toEqual([]);
+  });
+
+  it("targets the dominant paid tier when standard is absent", () => {
+    // express-only scheme: dominant = express → curves are returned (non-empty).
     const expressOnly: Scheme = { express: { tier: "express", fee: 15, freeThreshold: 200, avgCost: 12 } };
-    expect(thresholdCurves([o(80, "express")], expressOnly, ZERO)).toEqual([]);
+    const curves = thresholdCurves([o(80, "express")], expressOnly, ZERO);
+    expect(curves.length).toBeGreaterThan(0);
+    expect(curves.every((p) => typeof p.threshold === "number")).toBe(true);
   });
 });

@@ -182,8 +182,10 @@ export interface ThresholdCurvePoint {
 export interface RecommendedScheme {
   id: RecommendationId;
   label: string;
-  threshold: number | null; // recommended standard free-over (null = flat)
-  fee: number; // standard fee (= current fee for profit-first / basket-builder)
+  /** The tier this recommendation re-prices; fee/threshold refer to this tier. */
+  tier: CanonicalTier;
+  threshold: number | null; // recommended free-over for `tier` (null = flat)
+  fee: number; // fee for `tier` (= current fee for profit-first / basket-builder)
   contributionDelta: number; // objective: shipping P&L delta + margin effects, vs current
   netShippingProfitDelta: number;
   upliftMarginGain: number; // 0 for profit-first / threshold-fee

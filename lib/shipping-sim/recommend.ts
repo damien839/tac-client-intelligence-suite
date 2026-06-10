@@ -3,6 +3,7 @@ import { cheapestTier, tierCost } from "./tiers";
 import {
   BehavioralResult,
   BehaviorParams,
+  CANONICAL_TIERS,
   CanonicalTier,
   OrderBucket,
   RecommendationId,
@@ -39,6 +40,46 @@ export function bucketOrders(orders: TaggedOrder[]): OrderBucket[] {
   };
   const exact = build(false);
   return exact.length > MAX_EXACT_BUCKETS ? build(true) : exact;
+}
+
+/**
+ * The tier the recommendation sweeps target: the used tier with the most PAID
+ * orders under the current scheme (most orders with a positive current fee).
+ * Tie or all-free falls back to most total volume, then canonical tier order.
+ * Returns null when there are no analysable orders.
+ */
+export function dominantPaidTier(orders: TaggedOrder[], current: Scheme): CanonicalTier | null {
+  const valid = orders.filter((o) => current[o.tier] !== undefined);
+  if (valid.length === 0) return null;
+
+  const paid: Partial<Record<CanonicalTier, number>> = {};
+  const total: Partial<Record<CanonicalTier, number>> = {};
+  for (const o of valid) {
+    const tierConfig = current[o.tier]!;
+    total[o.tier] = (total[o.tier] ?? 0) + 1;
+    if (tierCost(tierConfig, o.gross) > 0) {
+      paid[o.tier] = (paid[o.tier] ?? 0) + 1;
+    }
+  }
+
+  let best: CanonicalTier | null = null;
+  let bestPaid = -1;
+  let bestTotal = -1;
+  for (const tier of CANONICAL_TIERS) {
+    const p = paid[tier] ?? 0;
+    const t = total[tier] ?? 0;
+    if (t === 0) continue;
+    if (
+      p > bestPaid ||
+      (p === bestPaid && t > bestTotal)
+      // canonical order: CANONICAL_TIERS is iterated in order, strict > keeps earliest
+    ) {
+      best = tier;
+      bestPaid = p;
+      bestTotal = t;
+    }
+  }
+  return best;
 }
 
 /** A bucket enriched with candidate-independent facts about the current scheme. */
@@ -226,7 +267,7 @@ interface CandidateResult {
 }
 
 /**
- * Run the three recommendation sweeps over the standard tier.
+ * Run the three recommendation sweeps over the dominant paid tier.
  * - profit-first: threshold only, uplift forced off
  * - threshold-fee: threshold x fee grid, uplift forced off
  * - basket-builder: threshold only, uplift per the caller's params
@@ -238,15 +279,19 @@ export function recommendOptions(
   current: Scheme,
   behavior: BehaviorParams
 ): RecommendedScheme[] {
-  const std = current.standard;
-  if (!std) return [];
+  const tier = dominantPaidTier(orders, current);
+  if (!tier) return [];
+  const target = current[tier]!;
+
   const valid = orders.filter((order) => current[order.tier] !== undefined);
+  // dominantPaidTier already returns null when valid.length === 0, so this is unreachable,
+  // but guard defensively against races.
   if (valid.length === 0) return [];
 
   const prepared = prepareBuckets(bucketOrders(valid), current);
   const baselineNet = baselineNetOf(prepared, current);
   const thresholds = thresholdCandidates(valid);
-  const maxFee = Math.ceil(Math.max(2 * std.fee, FEE_FLOOR));
+  const maxFee = Math.ceil(Math.max(2 * target.fee, FEE_FLOOR));
   // null is always last; the numeric cap is the second-to-last entry.
   const maxThreshold = thresholds[thresholds.length - 2] as number;
   const noUplift: BehaviorParams = { ...behavior, upliftRate: 0 };
@@ -256,7 +301,7 @@ export function recommendOptions(
     fee: number,
     params: BehaviorParams
   ): CandidateResult => {
-    const candidate: Scheme = { ...current, standard: { ...std, fee, freeThreshold: threshold } };
+    const candidate: Scheme = { ...current, [tier]: { ...target, fee, freeThreshold: threshold } };
     const result = behavioralScenario(prepared, candidate, params);
     return {
       threshold,
@@ -271,13 +316,13 @@ export function recommendOptions(
   const best = (candidates: CandidateResult[]): CandidateResult =>
     candidates.reduce((acc, c) => (c.contributionDelta > acc.contributionDelta ? c : acc));
 
-  const bestA = best(thresholds.map((t) => evalCandidate(t, std.fee, noUplift)));
+  const bestA = best(thresholds.map((t) => evalCandidate(t, target.fee, noUplift)));
   const grid: CandidateResult[] = [];
   for (let fee = 0; fee <= maxFee; fee += FEE_STEP) {
     for (const t of thresholds) grid.push(evalCandidate(t, fee, noUplift));
   }
   const bestB = best(grid);
-  const bestC = best(thresholds.map((t) => evalCandidate(t, std.fee, behavior)));
+  const bestC = best(thresholds.map((t) => evalCandidate(t, target.fee, behavior)));
 
   // Degeneracy guard: with abandonment off, nothing in the model punishes charging
   // more. Flag optima that charge everyone (no free shipping granted), pin the fee
@@ -304,6 +349,7 @@ export function recommendOptions(
   ): RecommendedScheme => ({
     id,
     label,
+    tier,
     threshold: c.threshold,
     fee: c.fee,
     contributionDelta: c.contributionDelta,
@@ -359,8 +405,8 @@ export function evaluateScheme(
 }
 
 /**
- * Contribution-vs-threshold curves for the sensitivity chart: the standard
- * free-over threshold sweeps the numeric candidates (fee held at current),
+ * Contribution-vs-threshold curves for the sensitivity chart: the dominant paid
+ * tier's free-over threshold sweeps the numeric candidates (fee held at current),
  * evaluated with basket-building off and on. Abandonment per the caller.
  */
 export function thresholdCurves(
@@ -368,8 +414,9 @@ export function thresholdCurves(
   current: Scheme,
   behavior: BehaviorParams
 ): ThresholdCurvePoint[] {
-  const std = current.standard;
-  if (!std) return [];
+  const tier = dominantPaidTier(orders, current);
+  if (!tier) return [];
+  const target = current[tier]!;
   const valid = orders.filter((order) => current[order.tier] !== undefined);
   if (valid.length === 0) return [];
   const prepared = prepareBuckets(bucketOrders(valid), current);
@@ -382,7 +429,7 @@ export function thresholdCurves(
   return thresholdCandidates(valid)
     .filter((t): t is number => t !== null)
     .map((threshold) => {
-      const candidate: Scheme = { ...current, standard: { ...std, freeThreshold: threshold } };
+      const candidate: Scheme = { ...current, [tier]: { ...target, freeThreshold: threshold } };
       return {
         threshold,
         contributionNoUplift: contribution(candidate, noUplift),
