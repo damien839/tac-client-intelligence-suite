@@ -28,9 +28,14 @@ export default function ThresholdSensitivityChart({
 }: ThresholdSensitivityChartProps) {
   return (
     <div className="card">
-      <h3 className="text-lg font-semibold mb-4 text-tac-accent">
+      <h3 className="text-lg font-semibold mb-1 text-tac-accent">
         Threshold sensitivity — standard free-over line
       </h3>
+      <p className="text-sm text-tac-muted mb-4">
+        How the outcome changes as the standard free-over threshold moves (fee held at current).
+        The gap between the lines is the basket-building effect; steep regions are where the
+        threshold decision matters.
+      </p>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={curves} margin={{ top: 16, right: 16, bottom: 4, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
@@ -92,11 +97,6 @@ export default function ThresholdSensitivityChart({
           />
         </LineChart>
       </ResponsiveContainer>
-      <p className="text-xs text-tac-muted mt-2">
-        Δ total contribution vs current as the standard free-over threshold sweeps, with the
-        standard fee held at its current value. Abandonment applies per the assumptions; the dashed
-        line adds basket-building at the assumed uplift rate.
-      </p>
     </div>
   );
 }

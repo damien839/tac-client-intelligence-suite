@@ -69,7 +69,10 @@ export default function FindingsCard({
 
   return (
     <div className="card">
-      <h3 className="text-lg font-semibold mb-3 text-tac-accent">Findings</h3>
+      <h3 className="text-lg font-semibold mb-1 text-tac-accent">Findings</h3>
+      <p className="text-sm text-tac-muted mb-3">
+        The story in bullets — start here if you read nothing else.
+      </p>
       <ul className="space-y-2.5 list-none p-0 m-0">
         {findings.map((f, i) => (
           <li key={i} className="text-sm border-l-2 border-l-tac-accent pl-3">

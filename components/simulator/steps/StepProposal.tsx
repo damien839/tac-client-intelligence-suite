@@ -187,16 +187,16 @@ export default function StepProposal({
 
   // Single source for the printed assumptions line — built from the deferred values the
   // metrics were actually computed from, so caption and numbers stay consistent mid-drag.
-  const assumptionEcho = `Assumptions: ${Math.round(deferredUplift * 100)}% of orders within $${deferredWindow} below the threshold build baskets (Basket-builder only); ${Math.round(deferredAbandon * 100)}% of worse-off orders abandon; COGS ${Math.round((deferredCogs ?? 0) * 100)}%. Deltas are expected values vs the observed current baseline over ${currentFacts?.orderCount ?? 0} orders.`;
+  const assumptionEcho = `Assumptions: ${Math.round(deferredUplift * 100)}% of orders within $${deferredWindow} below the threshold build baskets (Basket-builder only); ${Math.round(deferredAbandon * 100)}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${Math.round((deferredCogs ?? 0) * 100)}%. Deltas are expected values vs the observed current baseline over ${currentFacts?.orderCount ?? 0} orders.`;
 
   return (
     <div className="space-y-8">
       <OptionsComparison
-        recs={recs}
-        customEval={customEval}
+        options={reportOptions}
         currentFacts={currentFacts}
         currentScheme={currentScheme}
         customScheme={proposedScheme}
+        recsEmpty={recs !== null && recs.length === 0}
         cogsPercent={cogsPercent}
         monthlyOrders={monthlyOrders}
         upliftRate={upliftRate}

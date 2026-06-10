@@ -37,9 +37,13 @@ export default function RecoveryFreeShareChart({
 
   return (
     <div className="card">
-      <h3 className="text-lg font-semibold mb-4 text-tac-accent">
+      <h3 className="text-lg font-semibold mb-1 text-tac-accent">
         Cost recovery &amp; free-order share
       </h3>
+      <p className="text-sm text-tac-muted mb-4">
+        How much of the carrier bill customers fund (cost recovery) and how many orders ship
+        free, under each option.
+      </p>
       <ResponsiveContainer width="100%" height={260}>
         <BarChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
@@ -56,8 +60,8 @@ export default function RecoveryFreeShareChart({
         </BarChart>
       </ResponsiveContainer>
       <p className="text-xs text-tac-muted mt-2">
-        Cost recovery = shipping fees collected ÷ carrier spend. Free-order share = expected share
-        of completing orders that ship free (including basket-builders).
+        Cost recovery = shipping fees collected ÷ carrier spend — 100% means customers fully fund
+        shipping. Free-order share includes basket-builders.
       </p>
     </div>
   );

@@ -9,6 +9,7 @@ import VerdictCard from "./report/VerdictCard";
 import ContributionDecomposition from "./report/ContributionDecomposition";
 import RecoveryFreeShareChart from "./report/RecoveryFreeShareChart";
 import OrderImpactTable from "./report/OrderImpactTable";
+import TierMixChart from "./report/TierMixChart";
 import ThresholdSensitivityChart from "./report/ThresholdSensitivityChart";
 import FindingsCard from "./report/FindingsCard";
 
@@ -107,6 +108,8 @@ export default function ComparisonReport({
       <RecoveryFreeShareChart options={options} currentFacts={currentFacts} />
 
       <OrderImpactTable options={options} />
+
+      <TierMixChart options={options} currentFacts={currentFacts} />
 
       <AovDistribution grossValues={grossValues} markers={markers} />
 

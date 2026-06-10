@@ -27,7 +27,12 @@ export default function AovDistribution({ grossValues, markers }: AovDistributio
 
   return (
     <div className="card">
-      <h3 className="text-lg font-semibold mb-4 text-tac-accent">Where orders sit vs the thresholds</h3>
+      <h3 className="text-lg font-semibold mb-1 text-tac-accent">Where orders sit vs the thresholds</h3>
+      <p className="text-sm text-tac-muted mb-4">
+        Every order&apos;s value on one line. Free-shipping thresholds are marked: orders to the
+        right of a marker ship free under that option, and the cluster just below a marker is who
+        a basket-building push targets.
+      </p>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Order cart values vs thresholds" className="text-tac-text">
         {markers.map((m, i) => (
           <g key={i}>
@@ -58,10 +63,6 @@ export default function AovDistribution({ grossValues, markers }: AovDistributio
           </circle>
         ))}
       </svg>
-      <p className="text-xs text-tac-muted mt-2">
-        Each dot is an order by cart value. Watch orders clustered just below a free-shipping
-        line — under that option they are being asked to pay (or to build their basket up to it).
-      </p>
     </div>
   );
 }

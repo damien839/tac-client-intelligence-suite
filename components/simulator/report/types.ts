@@ -1,4 +1,4 @@
-import { RecommendationId, SchemeEvaluation } from "@/lib/shipping-sim/types";
+import { CanonicalTier, RecommendationId, SchemeEvaluation } from "@/lib/shipping-sim/types";
 
 export type OptionKey = RecommendationId | "custom";
 
@@ -29,6 +29,14 @@ export const OPTION_COLORS: Record<OptionKey, string> = {
 };
 
 export const NEUTRAL_COLOR = "#A0AEB8";
+
+/** Tier-series hues for the volume-mix chart — readable on dark, distinct from OPTION_COLORS. */
+export const TIER_COLORS: Record<CanonicalTier, string> = {
+  standard: "#5EEAD4",
+  express: "#F472B6",
+  nextday: "#FACC15",
+  sameday: "#818CF8",
+};
 
 // Shared recharts idioms (dark theme), carried over from the v2 report.
 export const TOOLTIP_STYLE = {

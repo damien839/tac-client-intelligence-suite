@@ -22,7 +22,12 @@ function renderCount(value: number): string {
 export default function OrderImpactTable({ options }: OrderImpactTableProps) {
   return (
     <div className="card overflow-x-auto">
-      <h3 className="text-lg font-semibold mb-4 text-tac-accent">How each option moves orders</h3>
+      <h3 className="text-lg font-semibold mb-1 text-tac-accent">How each option moves orders</h3>
+      <p className="text-sm text-tac-muted mb-4">
+        What customers do differently under each option, in expected order counts: who starts
+        paying for shipping, who ships free, who adds items to qualify, who switches service, who
+        walks away.
+      </p>
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-tac-border text-tac-muted">
@@ -48,9 +53,8 @@ export default function OrderImpactTable({ options }: OrderImpactTableProps) {
         </tbody>
       </table>
       <p className="text-xs text-tac-muted mt-3">
-        Expected-value-weighted order counts vs the current scheme — fractions reflect behavioural
-        probabilities, not whole orders. Categories overlap by mechanism (basket-builders are
-        counted separately, not as newly free).
+        Counts are modelled averages — fractions reflect probabilities, not whole orders.
+        Basket-builders are counted separately, not as newly free.
       </p>
     </div>
   );

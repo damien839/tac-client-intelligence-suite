@@ -16,6 +16,17 @@ function monthlyFigure(evaluation: SchemeEvaluation, monthlyOrders: number): str
   return formatCurrency(perOrder * monthlyOrders, 0);
 }
 
+/** Shared heading + plain-English explainer — prints in the PDF. */
+const HEADER = (
+  <>
+    <h3 className="text-lg font-semibold mb-1 text-tac-accent">Verdict</h3>
+    <p className="text-sm text-tac-muted mb-3">
+      What we&apos;d do and why — the option with the highest expected total contribution, with
+      its main cost spelled out.
+    </p>
+  </>
+);
+
 export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders }: VerdictCardProps) {
   const winner = rankedOptions[0];
   const runnerUp = rankedOptions[1];
@@ -23,7 +34,7 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
   if (!winner) {
     return (
       <div className="card">
-        <h3 className="text-lg font-semibold mb-2 text-tac-accent">Verdict</h3>
+        {HEADER}
         <p className="text-sm text-tac-muted">
           No option differs from the current scheme yet — map a service to Standard for
           recommendations, or adjust the Custom scheme to compare it here.
@@ -41,7 +52,7 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
   if (delta <= 0) {
     return (
       <div className="card border-l-2 border-l-tac-warning">
-        <h3 className="text-lg font-semibold mb-2 text-tac-accent">Verdict</h3>
+        {HEADER}
         <p className="text-sm mb-2">
           No modelled option beats the current scheme under these assumptions — the best candidate (
           <strong className="text-tac-accent">{winner.label}</strong>) still shows{" "}
@@ -61,7 +72,7 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
 
   return (
     <div className="card border-l-2 border-l-tac-accent">
-      <h3 className="text-lg font-semibold mb-2 text-tac-accent">Verdict</h3>
+      {HEADER}
       <p className="text-sm mb-2">
         <strong className="text-tac-accent">{winner.label}</strong> ({winner.schemeSummary}) leads
         with <strong>{signedCurrency(delta)}</strong> expected total contribution vs

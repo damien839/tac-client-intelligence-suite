@@ -41,9 +41,14 @@ export default function ContributionDecomposition({
 
   return (
     <div className="card">
-      <h3 className="text-lg font-semibold mb-4 text-tac-accent">
+      <h3 className="text-lg font-semibold mb-1 text-tac-accent">
         Where each option&apos;s contribution comes from
       </h3>
+      <p className="text-sm text-tac-muted mb-4">
+        Where each option&apos;s money comes from. Bars above zero add profit (extra fees,
+        carrier savings, bigger baskets); bars below zero cost profit (abandoned orders). Each
+        stack nets to the option&apos;s Δ total contribution in the table.
+      </p>
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
@@ -61,12 +66,6 @@ export default function ContributionDecomposition({
           ))}
         </BarChart>
       </ResponsiveContainer>
-      <p className="text-xs text-tac-muted mt-2">
-        Stacked components of each option&apos;s expected impact vs current: change in shipping fee
-        revenue, carrier saving (positive = spend falls), product margin gained from
-        basket-building, and product margin lost to abandonment (negative). Each stack nets to the
-        option&apos;s Δ total contribution in the table above.
-      </p>
     </div>
   );
 }
