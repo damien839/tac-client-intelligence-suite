@@ -9,8 +9,10 @@ export function describeStandard(config: TierConfig | undefined): string {
     : `${formatCurrency(config.fee)}, free over $${config.freeThreshold}`;
 }
 
-/** Currency string with an explicit leading "+" for non-negative values (negative zero normalised). */
+/** Currency string with an explicit leading "+" for non-negative values. Values below
+ * display precision (half a cent, incl. negative zero and float residue) normalise to 0
+ * so a no-op never renders as "-$0.00". */
 export function signedCurrency(n: number): string {
-  const normalized = n === 0 ? 0 : n; // avoid "+-$0.00" from negative zero
+  const normalized = Math.abs(n) < 0.005 ? 0 : n;
   return (normalized >= 0 ? "+" : "") + formatCurrency(normalized);
 }
