@@ -150,7 +150,7 @@ export function thresholdCandidates(orders: TaggedOrder[]): (number | null)[] {
   const p95 = sorted[Math.floor(0.95 * (sorted.length - 1))] ?? 0;
   const maxThreshold = Math.min(
     THRESHOLD_CAP,
-    Math.max(THRESHOLD_FLOOR, (Math.floor(p95 / THRESHOLD_STEP) + 1) * THRESHOLD_STEP)
+    Math.max(THRESHOLD_FLOOR, Math.ceil(p95 / THRESHOLD_STEP) * THRESHOLD_STEP)
   );
   const candidates: (number | null)[] = [];
   for (let t = 0; t <= maxThreshold; t += THRESHOLD_STEP) candidates.push(t);
