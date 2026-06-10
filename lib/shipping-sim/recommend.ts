@@ -73,7 +73,9 @@ export function prepareBuckets(buckets: OrderBucket[], current: Scheme): Prepare
  * 2. Basket-building: in-window paying orders build to the threshold with
  *    weight upliftRate — ship free, carrier cost unchanged, gain product margin.
  * 3. Abandonment: of the remaining weight, worse-off orders (landed fee above
- *    current fee) abandon with weight abandonRate — lose product margin.
+ *    current fee) abandon with probability `min(1, abandonRate × (increase / 10))` —
+ *    where `abandonRate` is the share abandoning per $10 of shipping-cost increase.
+ *    Lose product margin on the abandoning weight.
  * 4. The rest pay the landed fee.
  *
  * impact counts — EV-weighted, scaled by bucket.count:
@@ -100,6 +102,8 @@ export function behavioralScenario(
   let impactNewlyFree = 0;
   let impactBuilders = 0;
   let impactSwitchedTier = 0;
+  const volumeByTier: Record<CanonicalTier, number> = { standard: 0, express: 0, nextday: 0, sameday: 0 };
+  const carrierSpendByTier: Record<CanonicalTier, number> = { standard: 0, express: 0, nextday: 0, sameday: 0 };
 
   for (const bucket of buckets) {
     const cheapest = cheapestTier(candidate, bucket.gross);
@@ -119,8 +123,9 @@ export function behavioralScenario(
     const inWindow =
       threshold !== null && landedFee > 0 && bucket.gross >= threshold - upliftWindow;
     const buildWeight = inWindow ? upliftRate : 0;
-    const worseOff = landedFee > bucket.currentFee;
-    const abandonWeight = worseOff ? (1 - buildWeight) * abandonRate : 0;
+    const increase = landedFee - bucket.currentFee;
+    const abandonProb = increase > 0 ? Math.min(1, abandonRate * (increase / 10)) : 0;
+    const abandonWeight = (1 - buildWeight) * abandonProb;
     const payWeight = 1 - buildWeight - abandonWeight;
 
     shippingRevenue += payWeight * landedFee * bucket.count;
@@ -133,6 +138,10 @@ export function behavioralScenario(
     expectedOrdersLost += abandonWeight * bucket.count;
     freeOrders += (buildWeight + (landedFee === 0 ? payWeight : 0)) * bucket.count;
     completingOrders += (buildWeight + payWeight) * bucket.count;
+
+    // Per-tier volume and carrier spend (completing orders only)
+    volumeByTier[landed] += (buildWeight + payWeight) * bucket.count;
+    carrierSpendByTier[landed] += (buildWeight + payWeight) * landedConfig.avgCost * bucket.count;
 
     // Impact counts (EV-weighted, completing payers only for newlyPaying/newlyFree)
     impactBuilders += buildWeight * bucket.count;
@@ -156,6 +165,8 @@ export function behavioralScenario(
     expectedOrdersLost,
     freeOrderShare: completingOrders > 0 ? freeOrders / completingOrders : 0,
     recoveryRate: carrierSpend > 0 ? shippingRevenue / carrierSpend : 0,
+    volumeByTier,
+    carrierSpendByTier,
     impact: {
       newlyPaying: impactNewlyPaying,
       newlyFree: impactNewlyFree,
@@ -323,6 +334,8 @@ export function evaluateScheme(
     freeOrderShare: result.freeOrderShare,
     recoveryRate: result.recoveryRate,
     orderCount: valid.length,
+    volumeByTier: result.volumeByTier,
+    carrierSpendByTier: result.carrierSpendByTier,
     impact: result.impact,
   };
 }

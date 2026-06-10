@@ -119,6 +119,32 @@ describe("behavioralScenario", () => {
     expect(r.expectedOrdersLost).toBe(0);
     expect(r.shippingRevenue).toBe(10);
   });
+
+  it("scales abandonment with the size of the increase ($10 units, capped at 1)", () => {
+    const stdOnly: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    // $30 increase (fee 40 vs 10) at rate 0.1 -> probability 0.3
+    const fee40: Scheme = { standard: { tier: "standard", fee: 40, freeThreshold: 100, avgCost: 7 } };
+    const r30 = behavioralScenario(prepareBuckets(bucketOrders([o(80, "standard")]), stdOnly), fee40, {
+      cogsPercent: 0.5, upliftRate: 0, upliftWindow: 20, abandonRate: 0.1,
+    });
+    expect(r30.expectedOrdersLost).toBeCloseTo(0.3);
+    expect(r30.shippingRevenue).toBeCloseTo(0.7 * 40);
+
+    // $5 increase (fee 15 vs 10) at rate 0.1 -> probability 0.05
+    const fee15: Scheme = { standard: { tier: "standard", fee: 15, freeThreshold: 100, avgCost: 7 } };
+    const r5 = behavioralScenario(prepareBuckets(bucketOrders([o(80, "standard")]), stdOnly), fee15, {
+      cogsPercent: 0.5, upliftRate: 0, upliftWindow: 20, abandonRate: 0.1,
+    });
+    expect(r5.expectedOrdersLost).toBeCloseTo(0.05);
+
+    // $200 increase at rate 0.1 -> capped at 1 (all abandon)
+    const fee210: Scheme = { standard: { tier: "standard", fee: 210, freeThreshold: 100, avgCost: 7 } };
+    const rCap = behavioralScenario(prepareBuckets(bucketOrders([o(80, "standard")]), stdOnly), fee210, {
+      cogsPercent: 0.5, upliftRate: 0, upliftWindow: 20, abandonRate: 0.1,
+    });
+    expect(rCap.expectedOrdersLost).toBeCloseTo(1);
+    expect(rCap.shippingRevenue).toBe(0);
+  });
 });
 
 describe("bucketOrders", () => {
@@ -347,6 +373,25 @@ describe("evaluateScheme", () => {
     expect(e.carrierSpend).toBeCloseTo(14);
     expect(e.netShippingProfit).toBeCloseTo(e.shippingRevenue - e.carrierSpend);
     expect(e.impact).toEqual({ newlyPaying: 0, newlyFree: 0, builders: 0, switchedTier: 0 });
+  });
+
+  it("exposes per-tier volume and spend", () => {
+    const e = evaluateScheme([o(80, "standard"), o(150, "express")], current, current, ZERO)!;
+    expect(e.volumeByTier).toEqual({ standard: 1, express: 1, nextday: 0, sameday: 0 });
+    expect(e.carrierSpendByTier.standard).toBeCloseTo(7);
+    expect(e.carrierSpendByTier.express).toBeCloseTo(12);
+  });
+});
+
+describe("behavioralScenario volumeByTier and carrierSpendByTier", () => {
+  it("tracks per-tier volume and carrier spend including switches", () => {
+    // Express order switches to standard when express is dropped: volume lands on standard.
+    const candidate: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    const r = behavioralScenario(prepareBuckets(bucketOrders([o(150, "express"), o(80, "standard")]), current), candidate, ZERO);
+    expect(r.volumeByTier.standard).toBeCloseTo(2);
+    expect(r.volumeByTier.express).toBe(0);
+    expect(r.carrierSpendByTier.standard).toBeCloseTo(14);
+    expect(r.carrierSpendByTier.express).toBe(0);
   });
 });
 

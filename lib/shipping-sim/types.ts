@@ -112,7 +112,7 @@ export interface BehaviorParams {
   cogsPercent: number; // 0..1 — required to value product-margin effects
   upliftRate: number; // 0..1 — share of in-window orders that build baskets to the threshold
   upliftWindow: number; // $ — "in window" = within this much below the landed tier's threshold
-  abandonRate: number; // 0..1 — share of worse-off orders (shipping cost rose vs current) that abandon
+  abandonRate: number; // 0..1 — share abandoning *per $10 of shipping-cost increase*, capped at 100% (e.g. 0.1 → 10% abandon per $10 increase, so a $30 increase → 30% abandon)
 }
 
 /** Orders grouped by identical behaviour under the model. */
@@ -132,6 +132,10 @@ export interface BehavioralResult {
   expectedOrdersLost: number; // abandonment, in (fractional) orders
   freeOrderShare: number; // 0..1 of completing orders that ship free
   recoveryRate: number; // shippingRevenue / carrierSpend (0 when spend is 0)
+  /** EV-weighted completing-order volume per landed tier. */
+  volumeByTier: Record<CanonicalTier, number>;
+  /** EV-weighted carrier spend per landed tier. */
+  carrierSpendByTier: Record<CanonicalTier, number>;
   /**
    * EV-weighted order counts describing how the candidate moves orders vs current.
    * Builders are NOT included in newlyFree — each count captures its own mechanism
@@ -161,6 +165,10 @@ export interface SchemeEvaluation {
   freeOrderShare: number;
   recoveryRate: number;
   orderCount: number; // analysable orders the evaluation covers
+  /** EV-weighted completing-order volume per landed tier. */
+  volumeByTier: Record<CanonicalTier, number>;
+  /** EV-weighted carrier spend per landed tier. */
+  carrierSpendByTier: Record<CanonicalTier, number>;
   impact: BehavioralResult["impact"];
 }
 
