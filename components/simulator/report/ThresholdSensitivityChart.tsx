@@ -19,22 +19,25 @@ interface ThresholdSensitivityChartProps {
   curves: ThresholdCurvePoint[];
   currentThreshold: number | null;
   options: ReportOption[];
+  /** Display label of the swept tier (e.g. "Standard", "Express"). */
+  tierLabel: string;
 }
 
 export default function ThresholdSensitivityChart({
   curves,
   currentThreshold,
   options,
+  tierLabel,
 }: ThresholdSensitivityChartProps) {
   return (
     <div className="card">
       <h3 className="text-lg font-semibold mb-1 text-tac-accent">
-        Threshold sensitivity — standard free-over line
+        Threshold sensitivity — {tierLabel} free-over line
       </h3>
       <p className="text-sm text-tac-muted mb-4">
-        How the outcome changes as the standard free-over threshold moves (fee held at current).
-        The gap between the lines is the basket-building effect; steep regions are where the
-        threshold decision matters.
+        How the outcome changes as the {tierLabel} free-over threshold moves (fee held at
+        current). The gap between the lines is the basket-building effect; steep regions are
+        where the threshold decision matters.
       </p>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={curves} margin={{ top: 16, right: 16, bottom: 4, left: 8 }}>

@@ -12,7 +12,12 @@ import {
   OPTION_SHORT_LABELS,
   ReportOption,
 } from "../report/types";
-import { evaluateScheme, recommendOptions, thresholdCurves } from "@/lib/shipping-sim/recommend";
+import {
+  dominantPaidTier,
+  evaluateScheme,
+  recommendOptions,
+  thresholdCurves,
+} from "@/lib/shipping-sim/recommend";
 import {
   BehaviorParams,
   CanonicalTier,
@@ -73,6 +78,9 @@ export default function StepProposal({
     [orders, currentScheme, behavior]
   );
 
+  // The tier the recommendation sweeps re-price — drives labels and the "Now" markers.
+  const dominantTier = useMemo(() => dominantPaidTier(orders, currentScheme), [orders, currentScheme]);
+
   const customEval = useMemo(
     () => (behavior ? evaluateScheme(orders, currentScheme, deferredProposedScheme, behavior) : null),
     [orders, currentScheme, deferredProposedScheme, behavior]
@@ -121,15 +129,17 @@ export default function StepProposal({
   );
 
   // The three rec options: evaluated once per rec change, not on every Custom keystroke.
+  // Each rec re-prices its own tier (the dominant paid tier) — anchor on that tier's
+  // current config, never on standard.
   const recReportOptions = useMemo<ReportOption[]>(() => {
     if (!behavior || !recs) return [];
-    const std = currentScheme.standard;
-    if (!std) return [];
     const result: ReportOption[] = [];
     for (const rec of recs) {
+      const anchor = currentScheme[rec.tier];
+      if (!anchor) continue;
       const scheme: Scheme = {
         ...currentScheme,
-        standard: { ...std, fee: rec.fee, freeThreshold: rec.threshold },
+        [rec.tier]: { ...anchor, fee: rec.fee, freeThreshold: rec.threshold },
       };
       // Profit-first / Optimised force uplift off (matching recommendOptions);
       // Basket-builder uses the full behaviour params — so each evaluation reproduces
@@ -143,35 +153,18 @@ export default function StepProposal({
           label: rec.label,
           shortLabel: OPTION_SHORT_LABELS[rec.id],
           color: OPTION_COLORS[rec.id],
-          schemeSummary: describeStandard(scheme.standard),
+          schemeSummary: describeStandard(scheme[rec.tier]),
+          tier: rec.tier,
           threshold: rec.threshold,
           evaluation,
           unconstrained: rec.unconstrained,
           capPinned: rec.capPinned,
+          matchesCurrent: rec.fee === anchor.fee && rec.threshold === anchor.freeThreshold,
         });
       }
     }
     return result;
   }, [behavior, recs, orders, currentScheme]);
-
-  // Merge rec options with the Custom option. Custom reads from deferredProposedScheme
-  // so it only recomputes after the keystroke render has settled.
-  const reportOptions = useMemo<ReportOption[]>(() => {
-    const customOption: ReportOption[] = customEval
-      ? [
-          {
-            key: "custom",
-            label: "Custom",
-            shortLabel: OPTION_SHORT_LABELS.custom,
-            color: OPTION_COLORS.custom,
-            schemeSummary: describeStandard(deferredProposedScheme.standard),
-            threshold: deferredProposedScheme.standard?.freeThreshold ?? null,
-            evaluation: customEval,
-          },
-        ]
-      : [];
-    return [...recReportOptions, ...customOption];
-  }, [recReportOptions, customEval, deferredProposedScheme]);
 
   // Custom = Current per used tier (fee + free threshold)? Then it adds no information
   // and stays out of the verdict ranking.
@@ -186,6 +179,29 @@ export default function StepProposal({
     [usedTiers, currentScheme, proposedScheme]
   );
 
+  // Merge rec options with the Custom option. Custom reads from deferredProposedScheme
+  // so it only recomputes after the keystroke render has settled. Custom's tier is the
+  // dominant tier for labelling only — its scheme carries every tier's configuration.
+  const reportOptions = useMemo<ReportOption[]>(() => {
+    const customTier = dominantTier ?? "standard";
+    const customOption: ReportOption[] = customEval
+      ? [
+          {
+            key: "custom",
+            label: "Custom",
+            shortLabel: OPTION_SHORT_LABELS.custom,
+            color: OPTION_COLORS.custom,
+            schemeSummary: describeStandard(deferredProposedScheme[customTier]),
+            tier: customTier,
+            threshold: deferredProposedScheme[customTier]?.freeThreshold ?? null,
+            evaluation: customEval,
+            matchesCurrent: customIsCurrent,
+          },
+        ]
+      : [];
+    return [...recReportOptions, ...customOption];
+  }, [recReportOptions, customEval, deferredProposedScheme, dominantTier, customIsCurrent]);
+
   // Single source for the printed assumptions line — built from the deferred values the
   // metrics were actually computed from, so caption and numbers stay consistent mid-drag.
   const assumptionEcho = `Assumptions: ${Math.round(deferredUplift * 100)}% of orders within $${deferredWindow} below the threshold build baskets (Basket-builder only); ${Math.round(deferredAbandon * 100)}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${Math.round((deferredCogs ?? 0) * 100)}%. Deltas are expected values vs the observed current baseline over ${currentFacts?.orderCount ?? 0} orders.`;
@@ -197,6 +213,7 @@ export default function StepProposal({
         currentFacts={currentFacts}
         currentScheme={currentScheme}
         customScheme={deferredProposedScheme}
+        dominantTier={dominantTier}
         recsEmpty={recs !== null && recs.length === 0}
         cogsPercent={cogsPercent}
         monthlyOrders={monthlyOrders}
@@ -262,6 +279,7 @@ export default function StepProposal({
           options={reportOptions}
           currentFacts={currentFacts}
           currentScheme={currentScheme}
+          dominantTier={dominantTier}
           reconciliation={reconciliation}
           curves={curves}
           grossValues={grossValues}

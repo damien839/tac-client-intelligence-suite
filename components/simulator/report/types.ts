@@ -9,10 +9,14 @@ export interface ReportOption {
   shortLabel: string;
   color: string;
   schemeSummary: string;
-  threshold: number | null; // standard free-over line (null = flat / no free shipping)
+  /** The tier this option re-prices — schemeSummary/threshold/fee refer to this tier. */
+  tier: CanonicalTier;
+  threshold: number | null; // free-over line for `tier` (null = flat / no free shipping)
   evaluation: SchemeEvaluation;
   unconstrained?: boolean;
   capPinned?: boolean;
+  /** This option's best answer equals the current scheme's config for its tier. */
+  matchesCurrent?: boolean;
 }
 
 export const OPTION_SHORT_LABELS: Record<OptionKey, string> = {

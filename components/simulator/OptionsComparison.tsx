@@ -18,7 +18,9 @@ interface OptionsComparisonProps {
   currentFacts: SchemeEvaluation | null; // current scheme vs itself, behaviour zeroed
   currentScheme: Scheme;
   customScheme: Scheme;
-  /** True when recommendations were computed but came back empty (current scheme has no standard tier). */
+  /** The tier the recommendations re-price — the one carrying most paid shipping volume. */
+  dominantTier: CanonicalTier | null;
+  /** True when recommendations were computed but came back empty (no analysable paid tier). */
   recsEmpty: boolean;
   cogsPercent: number | undefined;
   monthlyOrders: number | undefined;
@@ -69,6 +71,7 @@ export default function OptionsComparison({
   currentFacts,
   currentScheme,
   customScheme,
+  dominantTier,
   recsEmpty,
   cogsPercent,
   monthlyOrders,
@@ -102,22 +105,20 @@ export default function OptionsComparison({
   const usedTiers: CanonicalTier[] = CANONICAL_TIERS.filter(
     (tier) => currentScheme[tier] !== undefined || customScheme[tier] !== undefined
   );
-  const hasNonStandardTiers = usedTiers.some((tier) => tier !== "standard");
 
   const orderCount = currentFacts?.orderCount ?? 0;
   const anyUnconstrained = options.some((option) => option.unconstrained);
   const anyCapPinned = options.some((option) => option.capPinned && !option.unconstrained);
 
   /**
-   * Per-tier scheme summary for a column. Recommendations only optimise the standard
-   * tier — every non-standard tier stays at current pricing for them; only Custom
-   * carries its own per-tier configuration.
+   * Per-tier scheme summary for a column. Recommendations only re-price their own
+   * tier (the dominant paid tier) — every other tier stays at current pricing for
+   * them; only Custom carries its own per-tier configuration.
    */
   function schemeCell(col: Column, tier: CanonicalTier): string {
-    if (tier === "standard") {
-      return col.isBaseline ? describeStandard(currentScheme.standard) : col.option?.schemeSummary ?? "—";
-    }
+    if (col.isBaseline) return describeStandard(currentScheme[tier]);
     if (col.option?.key === "custom") return describeStandard(customScheme[tier]);
+    if (tier === col.option?.tier) return col.option.schemeSummary;
     return describeStandard(currentScheme[tier]);
   }
 
@@ -280,11 +281,17 @@ export default function OptionsComparison({
         <>
           <div className="card overflow-x-auto">
             <p className="text-sm text-tac-muted mb-3">
-              Each column is a pricing option for your standard shipping; each row is a
-              consequence. Current is what your uploaded orders actually did. The three
-              recommendations come from testing thousands of threshold-and-fee combinations
-              against your orders; Custom is the scheme entered below the table. Read across a
-              row to compare options.
+              Each column is a pricing option; each row is a consequence. Current is what your
+              uploaded orders actually did. The three recommendations come from testing
+              thousands of threshold-and-fee combinations against your orders; Custom is the
+              scheme entered below the table. Read across a row to compare options.
+              {dominantTier && (
+                <>
+                  {" "}The three recommendations re-price your {TIER_LABELS[dominantTier]}{" "}
+                  service — the one carrying most of your paid shipping volume; other services
+                  stay at current pricing.
+                </>
+              )}
             </p>
             <table className="w-full text-sm">
               <thead>
@@ -299,6 +306,14 @@ export default function OptionsComparison({
                           <span title="Optimum sits at the edge of the tested range — the best value may lie beyond it. Treat as directional.">†</span>
                         )}
                       </span>
+                      {col.option?.matchesCurrent && (
+                        <span
+                          className="block text-xs text-tac-muted font-normal"
+                          title="This option's best answer is your current scheme — already optimal under these assumptions"
+                        >
+                          = current
+                        </span>
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -333,13 +348,6 @@ export default function OptionsComparison({
               </tbody>
             </table>
             <p className="text-xs text-tac-muted mt-3">{assumptionEcho}</p>
-            {hasNonStandardTiers && (
-              <p className="text-xs text-tac-muted mt-1">
-                Recommendations never alter non-standard tiers — those services stay at their
-                current pricing in every recommended option; only the Custom scheme can change
-                them.
-              </p>
-            )}
             {anyUnconstrained && (
               <p className="text-xs text-tac-warning mt-1">
                 * Abandonment is 0% — nothing stops &quot;charge everyone more&quot;, so this
@@ -357,8 +365,8 @@ export default function OptionsComparison({
           {recsEmpty && (
             <div className="card">
               <p className="text-sm text-tac-muted">
-                Recommendations target the standard free-over line — map a service to Standard to
-                enable the three recommended options. The table compares Current vs Custom only.
+                No recommendations — none of the uploaded orders map to a service in the current
+                scheme.
               </p>
             </div>
           )}

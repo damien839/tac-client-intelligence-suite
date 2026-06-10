@@ -1,7 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { Reconciliation, Scheme, SchemeEvaluation, ThresholdCurvePoint } from "@/lib/shipping-sim/types";
+import {
+  CanonicalTier,
+  Reconciliation,
+  Scheme,
+  SchemeEvaluation,
+  ThresholdCurvePoint,
+  TIER_LABELS,
+} from "@/lib/shipping-sim/types";
 import ReconciliationBadge from "./analysis/ReconciliationBadge";
 import AovDistribution, { ThresholdMarker } from "./analysis/AovDistribution";
 import { NEUTRAL_COLOR, ReportOption } from "./report/types";
@@ -17,6 +24,8 @@ interface ComparisonReportProps {
   options: ReportOption[];
   currentFacts: SchemeEvaluation;
   currentScheme: Scheme;
+  /** The tier the recommendations re-price — drives the "Now" markers and chart labels. */
+  dominantTier: CanonicalTier | null;
   reconciliation: Reconciliation;
   curves: ThresholdCurvePoint[];
   grossValues: number[];
@@ -41,6 +50,7 @@ export default function ComparisonReport({
   options,
   currentFacts,
   currentScheme,
+  dominantTier,
   reconciliation,
   curves,
   grossValues,
@@ -58,7 +68,11 @@ export default function ComparisonReport({
     [options, customIsCurrent]
   );
 
-  const currentThreshold = currentScheme.standard?.freeThreshold ?? null;
+  // "Now" marks the swept tier's current free-over line — the one the options re-price.
+  const currentThreshold = dominantTier !== null
+    ? currentScheme[dominantTier]?.freeThreshold ?? null
+    : null;
+  const tierLabel = TIER_LABELS[dominantTier ?? "standard"];
 
   const markers: ThresholdMarker[] = [
     ...(currentThreshold !== null
@@ -118,6 +132,7 @@ export default function ComparisonReport({
           curves={curves}
           currentThreshold={currentThreshold}
           options={options}
+          tierLabel={tierLabel}
         />
       )}
 

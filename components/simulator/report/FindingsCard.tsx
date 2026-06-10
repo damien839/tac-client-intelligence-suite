@@ -63,7 +63,7 @@ export default function FindingsCard({
     }
   } else {
     findings.push(
-      "No option differs from the current scheme yet — map a service to Standard for recommendations, or adjust the Custom scheme."
+      "No option differs from the current scheme yet — recommendations need uploaded orders that map to a service in the current scheme; adjust the Custom scheme to compare one here."
     );
   }
 
