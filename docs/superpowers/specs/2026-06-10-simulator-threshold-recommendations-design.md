@@ -138,6 +138,18 @@ Rendered directly under the comparison table; the whole report is printable and 
 - The drill-down tab strip, `selected`/`activeKey` state, and `analyze()` usage in StepProposal go away. `lib/shipping-sim/analysis.ts` stays (tested, used by nothing in the UI — candidate for later cleanup).
 - Pre-COGS, the report shows only the reconciliation badge plus the COGS prompt (no option data exists to report on).
 
+## v3.1 amendments (2026-06-10, after Damo's first real-data run)
+
+Real 525-order dataset surfaced three issues:
+
+1. **Flat abandonment is degenerate.** With a $30 fee, "Optimised" recommended $60 flat (+$3,029) — pinned at the fee sweep cap, because 10% of worse-off orders abandon regardless of how much worse off they are, so charging more almost always wins. **Fix: magnitude-scaled abandonment.** `abandonRate` now means *share abandoning per $10 of shipping-cost increase*, capped at 100%: `abandonProb = min(1, abandonRate × (landedFee − currentFee) / 10)` when the increase is positive. Slider label/tooltip/echo updated accordingly. Existing $10-increase fixtures keep their expected values by construction.
+2. **Express invisible.** The comparison table only summarised the standard tier. Fix: one scheme-summary row per used tier — recommendations leave non-standard tiers at current (shown as such); Custom shows its own per-tier config.
+3. **No volume split / cost shift.** Engine: `BehavioralResult` (and `SchemeEvaluation`) gain `volumeByTier` and `carrierSpendByTier` (EV-weighted, by landed tier, completing orders). Comparison table gains per-used-tier volume rows (count + share of completing) and a carrier-spend row (absolute for Current, absolute + signed Δ for options). Report gains a **Tier volume mix** grouped-bar section (Current + options × used tiers) between the order-impact table and the AOV distribution.
+
+The comparison table is now driven by the same per-option `ReportOption`/`SchemeEvaluation` data as the report (single source), replacing its direct use of `RecommendedScheme` metrics.
+
+4. **Sections are confusing without context** (Damo: "can you explain each section better"). Every report section and the comparison table open with a one-to-two-sentence plain-English explainer — what the section shows, how to read it, what to look for — in muted text that PRINTS (the client reads the PDF without us in the room). Comparison-table metric rows get a tooltip (ⓘ title) defining each metric in plain words. Explainers must describe the reader's decision, not the implementation ("Which option makes the most money after customers react" — not "EV-weighted contribution delta").
+
 ### v1 UI (superseded, kept for history)
 
 Three cards with one-click Apply writing into the proposal inputs; "applied" state on the matching card. Replaced because applying mutated the single report instead of presenting the three options side by side.
