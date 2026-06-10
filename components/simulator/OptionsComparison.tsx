@@ -245,7 +245,7 @@ export default function OptionsComparison({
             step={5}
             min={0}
             max={100}
-            tooltip="Share of orders just below the threshold that add items to qualify"
+            tooltip="Share of orders just below a NEW free-shipping threshold that add items to qualify. Orders already near the current threshold have shown they don't build, so they're excluded."
           />
           <InputField
             label="Uplift window"

@@ -45,6 +45,7 @@ export function bucketOrders(orders: TaggedOrder[]): OrderBucket[] {
 export interface PreparedBucket extends OrderBucket {
   currentFee: number; // shipping the bucket pays under the current scheme
   premium: number; // revealed WTP premium under the current scheme
+  currentThreshold: number | null; // free-over threshold of the bucket's current-scheme tier
 }
 
 /**
@@ -63,6 +64,7 @@ export function prepareBuckets(buckets: OrderBucket[], current: Scheme): Prepare
       ...bucket,
       currentFee: tierCost(current[bucket.tier]!, bucket.gross),
       premium: revealedPremium(order, current),
+      currentThreshold: current[bucket.tier]!.freeThreshold,
     };
   });
 }
@@ -72,6 +74,10 @@ export function prepareBuckets(buckets: OrderBucket[], current: Scheme): Prepare
  * 1. Land via revealed-WTP (same rule as landedTier, using the cached premium).
  * 2. Basket-building: in-window paying orders build to the threshold with
  *    weight upliftRate — ship free, carrier cost unchanged, gain product margin.
+ *    Revealed-preference guard: uplift only applies where the candidate creates a
+ *    NEW basket-building incentive. If the order was already within `upliftWindow`
+ *    of the current scheme's threshold and was still paying, the data shows it
+ *    didn't build — so it's excluded from uplift for the candidate too.
  * 3. Abandonment: of the remaining weight, worse-off orders (landed fee above
  *    current fee) abandon with probability `min(1, abandonRate × (increase / 10))` —
  *    where `abandonRate` is the share abandoning per $10 of shipping-cost increase.
@@ -120,9 +126,14 @@ export function behavioralScenario(
     const threshold = landedConfig.freeThreshold;
 
     // landedFee > 0 with a non-null threshold implies gross < threshold.
+    // Already had this incentive under the current scheme and demonstrably didn't build.
+    const alreadyInWindow =
+      bucket.currentThreshold !== null &&
+      bucket.currentFee > 0 &&
+      bucket.gross >= bucket.currentThreshold - upliftWindow;
     const inWindow =
       threshold !== null && landedFee > 0 && bucket.gross >= threshold - upliftWindow;
-    const buildWeight = inWindow ? upliftRate : 0;
+    const buildWeight = inWindow && !alreadyInWindow ? upliftRate : 0;
     const increase = landedFee - bucket.currentFee;
     const abandonProb = increase > 0 ? Math.min(1, abandonRate * (increase / 10)) : 0;
     const abandonWeight = (1 - buildWeight) * abandonProb;

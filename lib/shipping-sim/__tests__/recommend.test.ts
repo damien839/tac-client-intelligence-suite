@@ -39,11 +39,13 @@ describe("behavioralScenario", () => {
   });
 
   it("applies basket-building uplift to in-window paying orders", () => {
-    // gross 90, std fee 10 / free over 100, window 20 -> in window [80, 100).
+    // gross 90, candidate fee 10 / free over 100, window 20 -> in window [80, 100).
+    // Current = FLAT (no threshold): the window is NEW, so uplift applies.
     // uplift 0.5: half build (free, margin gain (100-90)*0.6), half pay $10. Not worse off -> no abandonment.
-    const stdOnly: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
-    const prepared = prepareBuckets(bucketOrders([o(90, "standard")]), stdOnly);
-    const r = behavioralScenario(prepared, stdOnly, {
+    const flatCurrent: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 } };
+    const candidate: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    const prepared = prepareBuckets(bucketOrders([o(90, "standard")]), flatCurrent);
+    const r = behavioralScenario(prepared, candidate, {
       cogsPercent: 0.4,
       upliftRate: 0.5,
       upliftWindow: 20,
@@ -77,10 +79,12 @@ describe("behavioralScenario", () => {
 
   it("splits weight build / abandon / pay for an in-window, worse-off order", () => {
     // gross 85, candidate fee 20 (worse than current 10), threshold 100, window 20 -> in window.
+    // Current = FLAT (no threshold): the window is NEW, so uplift applies.
+    // Increase = 20 - 10 = $10; abandonProb = min(1, 0.5 * (10/10)) = 0.5.
     // uplift 0.4 builds; of remaining 0.6, abandon 0.5 -> 0.3 abandons, 0.3 pays.
-    const stdOnly: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    const flatCurrent: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 } };
     const candidate: Scheme = { standard: { tier: "standard", fee: 20, freeThreshold: 100, avgCost: 7 } };
-    const prepared = prepareBuckets(bucketOrders([o(85, "standard")]), stdOnly);
+    const prepared = prepareBuckets(bucketOrders([o(85, "standard")]), flatCurrent);
     const r = behavioralScenario(prepared, candidate, {
       cogsPercent: 0,
       upliftRate: 0.4,
@@ -118,6 +122,18 @@ describe("behavioralScenario", () => {
     });
     expect(r.expectedOrdersLost).toBe(0);
     expect(r.shippingRevenue).toBe(10);
+  });
+
+  it("does not apply uplift to windows the customer already declined under the current scheme", () => {
+    // gross 90 is in the $20 window below the CURRENT $100 threshold — the data already
+    // shows this customer didn't build. Candidate = same scheme -> no uplift.
+    const stdOnly: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    const r = behavioralScenario(prepareBuckets(bucketOrders([o(90, "standard")]), stdOnly), stdOnly, {
+      cogsPercent: 0.4, upliftRate: 0.5, upliftWindow: 20, abandonRate: 0,
+    });
+    expect(r.upliftMarginGain).toBe(0);
+    expect(r.impact.builders).toBe(0);
+    expect(r.shippingRevenue).toBeCloseTo(10); // pays as observed
   });
 
   it("scales abandonment with the size of the increase ($10 units, capped at 1)", () => {
@@ -233,33 +249,39 @@ describe("recommendOptions", () => {
   });
 
   it("computes the three cards on a single-tier fixture (hand-verified)", () => {
-    // Current: std fee $10, free over $200, cost $7. One order, gross $185 (pays $10 today).
-    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 200, avgCost: 7 } };
+    // Current: std fee $10, FLAT (no threshold), cost $7. One order, gross $185 (pays $10 today).
+    // Baseline net = 10 - 7 = 3.
+    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 } };
     const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 1, upliftWindow: 20, abandonRate: 0 };
     const recs = recommendOptions([o(185, "standard")], cur, b);
     const a = recs.find((r) => r.id === "profit-first")!;
     const tf = recs.find((r) => r.id === "threshold-fee")!;
     const bb = recs.find((r) => r.id === "basket-builder")!;
 
-    // A (uplift off): any T <= 180 makes the order free (delta -10); T >= 190 keeps it
-    // paying (delta 0). Ties prefer the lowest threshold -> 190. Charges everyone ->
-    // unconstrained flag (abandonment 0).
+    // A (uplift off): any T <= 185 makes the order free (revenue 0, delta (0-7)-3 = -10);
+    // T = 190 keeps it paying (pays 10, delta (10-7)-3 = 0). Ties prefer lowest threshold
+    // -> 190. freeOrderShare=0 -> unconstrained flag (abandonment 0, charges everyone).
     expect(a.threshold).toBe(190);
     expect(a.contributionDelta).toBeCloseTo(0);
     expect(a.unconstrained).toBe(true);
 
-    // B: with no abandonment, revenue is monotone in fee -> pins at maxFee = max(2*10, 30) = 30.
+    // B: with no abandonment, revenue is monotone in fee -> pins at maxFee = max(2*10,30) = 30.
+    // At fee=30, T=190: pays 30, delta = (30-7)-3 = 20. unconstrained (fee=maxFee, abandon=0).
     expect(tf.fee).toBe(30);
     expect(tf.threshold).toBe(190);
     expect(tf.contributionDelta).toBeCloseTo(20); // (30-7) - (10-7)
     expect(tf.unconstrained).toBe(true);
+    expect(tf.capPinned).toBe(true); // fee === maxFee
 
-    // C (uplift on): at T=200 the order (in window [180,200)) builds: loses the $10 fee,
-    // gains (200-185)*0.8 = $12 margin -> delta +2. Beats every paying candidate (0).
+    // C (uplift on): current is FLAT so any candidate threshold creates a NEW window.
+    // At T=200: order in window [180,200), buildWeight=1 (upliftRate=1), alreadyInWindow=false.
+    //   shippingRevenue=0, carrierSpend=7, upliftMarginGain=(200-185)*0.8=12
+    //   delta = (0-7)-3 + 12 = +2. Beats every paying candidate (delta 0).
+    // freeOrderShare=1 (builder ships free) -> unconstrained=false (interior optimum).
     expect(bb.threshold).toBe(200);
     expect(bb.contributionDelta).toBeCloseTo(2);
     expect(bb.upliftMarginGain).toBeCloseTo(12);
-    expect(bb.unconstrained).toBe(false); // optimum is interior, threshold gives free shipping
+    expect(bb.unconstrained).toBe(false);
   });
 
   it("does not flag unconstrained when abandonment is set", () => {
@@ -329,10 +351,10 @@ describe("recommendOptions", () => {
   });
 
   it("sets capPinned=false for the hand-verified single-tier case (interior optimum)", () => {
-    // Reuse the existing single-tier fixture: T=200, fee=10. The basket-builder
-    // optimum lands at T=200 (interior, well below maxThreshold=400) with fee=10
-    // (unchanged). capPinned must be false.
-    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 200, avgCost: 7 } };
+    // Reuse the updated single-tier fixture: FLAT current, candidate T=200, fee=10.
+    // The basket-builder optimum lands at T=200 (interior, well below maxThreshold=400)
+    // with fee=10 (unchanged). capPinned must be false.
+    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 } };
     const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 1, upliftWindow: 20, abandonRate: 0 };
     const recs = recommendOptions([o(185, "standard")], cur, b);
     const bb = recs.find((r) => r.id === "basket-builder")!;
@@ -391,6 +413,17 @@ describe("evaluateScheme", () => {
     expect(e.abandonMarginLoss).toBe(0);
     expect(e.expectedOrdersLost).toBe(0);
     expect(e.orderCount).toBe(3);
+  });
+
+  it("evaluating the current scheme against itself is a strict no-op even with full behaviour", () => {
+    const orders = [o(80, "standard"), o(90, "standard"), o(150, "standard"), o(150, "express")];
+    const full: BehaviorParams = { cogsPercent: 0.4, upliftRate: 0.5, upliftWindow: 20, abandonRate: 0.3 };
+    const e = evaluateScheme(orders, current, current, full)!;
+    expect(e.contributionDelta).toBe(0);
+    expect(e.netShippingProfitDelta).toBe(0);
+    expect(e.upliftMarginGain).toBe(0);
+    expect(e.abandonMarginLoss).toBe(0);
+    expect(e.expectedOrdersLost).toBe(0);
   });
 
   it("matches the recommendOptions metrics for the same candidate scheme", () => {
@@ -467,8 +500,11 @@ describe("behavioralScenario impact counts", () => {
     expect(free.impact.newlyFree).toBe(1);
     expect(free.impact.builders).toBe(0);
 
-    // gross 90, candidate = current, uplift 0.5: builders 0.5; the paying half is NOT newly free.
-    const r = behavioralScenario(prepareBuckets(bucketOrders([o(90, "standard")]), stdOnly), stdOnly, {
+    // gross 90, current = FLAT (no threshold), candidate T=100: window is NEW -> builders 0.5.
+    // currentFee=10, landedFee=10, no abandonment; half build free, half pay $10 -> newlyFree 0.
+    const flatCurrent: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 } };
+    const candT100: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
+    const r = behavioralScenario(prepareBuckets(bucketOrders([o(90, "standard")]), flatCurrent), candT100, {
       cogsPercent: 0.4, upliftRate: 0.5, upliftWindow: 20, abandonRate: 0,
     });
     expect(r.impact.builders).toBeCloseTo(0.5);

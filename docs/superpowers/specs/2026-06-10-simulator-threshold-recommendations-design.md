@@ -150,6 +150,8 @@ The comparison table is now driven by the same per-option `ReportOption`/`Scheme
 
 4. **Sections are confusing without context** (Damo: "can you explain each section better"). Every report section and the comparison table open with a one-to-two-sentence plain-English explainer — what the section shows, how to read it, what to look for — in muted text that PRINTS (the client reads the PDF without us in the room). Comparison-table metric rows get a tooltip (ⓘ title) defining each metric in plain words. Explainers must describe the reader's decision, not the implementation ("Which option makes the most money after customers react" — not "EV-weighted contribution delta").
 
+**5. Revealed-preference guard on uplift.** Basket-building only applies where the candidate creates a NEW window — orders already within the uplift window of their current tier's threshold demonstrably didn't build, so they're excluded. Guarantees evaluating the current scheme against itself is a strict no-op under any behaviour settings.
+
 ### v1 UI (superseded, kept for history)
 
 Three cards with one-click Apply writing into the proposal inputs; "applied" state on the matching card. Replaced because applying mutated the single report instead of presenting the three options side by side.
