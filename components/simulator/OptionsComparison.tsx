@@ -288,7 +288,7 @@ export default function OptionsComparison({
               {dominantTier && (
                 <>
                   {" "}The three recommendations re-price your {TIER_LABELS[dominantTier]}{" "}
-                  service — the one carrying most of your paid shipping volume; other services
+                  service — the service carrying most of your shipping volume; other services
                   stay at current pricing.
                 </>
               )}

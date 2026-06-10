@@ -285,7 +285,7 @@ export function recommendOptions(
 
   const valid = orders.filter((order) => current[order.tier] !== undefined);
   // dominantPaidTier already returns null when valid.length === 0, so this is unreachable,
-  // but guard defensively against races.
+  // but guard against future drift between the two filters.
   if (valid.length === 0) return [];
 
   const prepared = prepareBuckets(bucketOrders(valid), current);
