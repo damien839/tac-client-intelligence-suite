@@ -109,6 +109,35 @@ Engine addition: `evaluateScheme(orders, current, candidate, behavior)` exported
 
 Brand: existing `tac-*` tokens, consistent with the rest of the analysis panel.
 
+## Reporting under the table — v3 comparative report (revised 2026-06-10 after Damo feedback; supersedes the v2 drill-down)
+
+Damo: "all the reporting under the table needs to be redone, it doesn't make sense anymore." The v2 drill-down was the old current-vs-proposed report: "proposal" language, one option at a time, and behaviour-free numbers that contradicted the table above it. Decisions: **comparative sections** (every section covers all options at once, no tabs) and **behaviour-consistent numbers everywhere** (the same expected-value model as the table; the mechanical no-behaviour view disappears).
+
+### Engine additions (`lib/shipping-sim/`, TDD)
+
+- `BehavioralResult` gains EV-weighted order-impact counts: `impact: { newlyPaying, newlyFree, builders, switchedTier }` (abandoners already exist as `expectedOrdersLost`). "Newly paying/free" compare the order's candidate shipping fee against its current fee; builders = basket-building weight; switchedTier = weight landing on a different tier than chosen.
+- `SchemeEvaluation` gains the absolutes `shippingRevenue`, `carrierSpend`, `netShippingProfit` and the `impact` counts, so the report can decompose contribution without re-deriving anything.
+- New `thresholdCurves(orders, current, behavior)`: for each numeric threshold candidate (standard fee held at current), the contribution delta with uplift off and with uplift on — `{ threshold, contributionNoUplift, contributionWithUplift }[]`. Powers the sensitivity chart.
+
+### Report sections (`components/simulator/ComparisonReport.tsx`, replaces BenchmarkPanel)
+
+Rendered directly under the comparison table; the whole report is printable and the PDF-export button moves here. Sections, in order:
+
+1. **Reconciliation badge** — reuse `ReconciliationBadge`; reconciliation computed from Σ `shippingPaid` vs the Current column's deterministic revenue (no `analyze()` needed).
+2. **Headline verdict** — one narrative card: the option with the highest Δ total contribution, its expected cost (orders lost, free-share shift), and the runner-up trade-off. Custom included when it differs from current.
+3. **Contribution decomposition chart** — stacked bar per option: Δ shipping fee revenue, Δ carrier spend (sign-flipped so savings stack positive), basket margin gain, abandonment margin loss (negative); the stack nets to Δ total contribution.
+4. **Recovery & free-share comparison** — grouped bars across Current + options: cost recovery %, free-order share %.
+5. **Order impact table** — rows: Newly paying, Newly free, Build baskets, Switch tier, Abandon (expected, 1dp); columns: the options. EV-weighted counts from `impact`.
+6. **AOV distribution** — reuse `AovDistribution` (prop changed from `movement` to plain gross values since `analyze()` is no longer in the path), markers for the current threshold and each option's threshold.
+7. **Threshold sensitivity** — line chart of contribution vs standard free-over threshold from `thresholdCurves`: one line without basket-building, one with; reference lines at current + each option's threshold.
+8. **Findings** — comparative bullets (which option wins and why, where the money comes from, what it risks, illustrative monthly/annual scaling when volume is set) with the assumption echo.
+
+### Removals
+
+- `BenchmarkPanel.tsx` and its single-option children (`VerdictHeader`, `ProfitBridge`, `RecoveryGauges`, `TierEconomicsTable`, `MovementTable`, `CarrierMixChart`, `ThresholdSweepChart`, `Findings`) are deleted. `ReconciliationBadge`, `AovDistribution`, `format.ts` survive.
+- The drill-down tab strip, `selected`/`activeKey` state, and `analyze()` usage in StepProposal go away. `lib/shipping-sim/analysis.ts` stays (tested, used by nothing in the UI — candidate for later cleanup).
+- Pre-COGS, the report shows only the reconciliation badge plus the COGS prompt (no option data exists to report on).
+
 ### v1 UI (superseded, kept for history)
 
 Three cards with one-click Apply writing into the proposal inputs; "applied" state on the matching card. Replaced because applying mutated the single report instead of presenting the three options side by side.
