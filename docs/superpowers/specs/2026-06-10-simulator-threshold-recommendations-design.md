@@ -159,6 +159,31 @@ Real data: 80% of orders ship express at $60 flat; standard (the only tier the o
 1. **Optimize the dominant paid tier.** The three sweeps target whichever used tier has the most PAID orders under the current scheme (`dominantPaidTier()` — most orders with `currentFee > 0`; tie or all-free falls back to most total volume, then canonical order). All sweep mechanics are unchanged, just applied to that tier's fee/threshold; other tiers stay at current. `RecommendedScheme` gains `tier: CanonicalTier`. `thresholdCurves` sweeps the same tier. The UI states which service the recommendations re-price (table explainer, footnote, sensitivity caption, AOV markers); the old "no standard tier" edge becomes "no analysable paid tier".
 2. **No-op badge.** When an option's recommended config equals the current scheme's config for the optimised tier, its column header shows an "= current" badge (title: already optimal under these assumptions) and the scheme row reads as unchanged. The verdict's keep-current branch continues to carry the narrative.
 
+## v4 — buying-behaviour redesign (2026-06-12, per Damo's first-principles rethink)
+
+Damo's direction, restated: Option 1 must improve **net profit** through two engines — maximising shipping revenue AND shifting freight from express to standard (carrier saving). Basket-building must read the **complete order range** and place thresholds at the price point that drives **one additional unit**, based on the AOV/unit data in the Shopify export — and that applies to free-express thresholds too ("if free express is selected above a certain value, that value should be driving another unit"). Orders go into behaviour **buckets** that visibly shift under each option. Custom becomes **Competitor benchmark** (enter a competitor's scheme; highlight that the comparison assumes comparable RRP).
+
+### Option lineup (replaces Profit-first / Optimised / Basket-builder)
+
+1. **Net profit maximiser** — sweeps levers across BOTH paid tiers: standard threshold × standard fee × express fee (express threshold drawn from the unit-driven candidate set below, plus flat). Objective: expected total contribution. The report explicitly narrates the freight shift: orders moved express→standard and the carrier saving, alongside fee-revenue recovery. Grid is bounded coarse-to-fine to stay interactive (target <500ms typical; budget documented in the plan).
+2. **Basket-builder (unit-driven)** — threshold candidates are derived from the data, not assumed: (a) order-value clusters from a $10-bin histogram of gross; (b) **typical unit price** = quantity-weighted median line-item price (full export) — candidates = cluster edge + one typical unit, rounded to $5, generated for standard AND express free-over lines. The uplift window defaults to the typical unit price ("orders within one unit of the threshold add a unit"); the uplift-rate slider stays as the tunable share. Recommendation copy names the cluster and the unit: "Free over $X — your $140–$170 orders add one ~$45 unit to qualify." Without line items it falls back to today's slider-driven sweep.
+3. **Competitor benchmark** — the manual column, renamed; intro copy: "Enter a competitor's shipping scheme to see what matching it would do. Assumes your product pricing (RRP) is comparable — if their RRP differs, the comparison is not like-for-like." (printed).
+
+### Buying-behaviour buckets
+
+Auto-derived segments, computed per option: item count (1 / 2 / 3+) × position vs the option's relevant threshold (well below / within one unit / at-or-above) × chosen service. A new report section lists each bucket (name, orders, value share) and where it lands under each option (pays / free / builds / switches service / abandons — EV-weighted). This subsumes the order-impact table as the primary "what moves" story; buckets are the unit of explanation in findings and verdict.
+
+### Parser — dual mode
+
+- **Full Shopify orders export** (detected by `Name` + `Lineitem quantity` + `Lineitem price` columns): rows grouped by order Name; order gross/shipping/method from the order-level row; `units` = Σ line-item quantities; line-item prices feed the unit-price distribution. Unlocks unit-driven thresholds and item-count buckets.
+- **Summary CSV** (current 3 columns): keeps working; unit-driven features fall back to sliders; buckets degrade to value-position × service.
+- `OrderRow` gains optional `units?: number`; a new `UnitStats` (typical unit price, units/order distribution) flows into the engine.
+
+### Out of scope for v4
+
+- Conversion-gain lever for price decreases (raised 2026-06-10, still open — revisit after v4).
+- Multi-market/currency handling; per-item express surcharges (the "after the 3rd item" idea resolved to unit-driving thresholds instead).
+
 ### v1 UI (superseded, kept for history)
 
 Three cards with one-click Apply writing into the proposal inputs; "applied" state on the matching card. Replaced because applying mutated the single report instead of presenting the three options side by side.
