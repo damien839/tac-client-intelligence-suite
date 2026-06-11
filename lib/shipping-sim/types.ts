@@ -14,11 +14,19 @@ export const TIER_LABELS: Record<CanonicalTier, string> = {
   sameday: "Same Day",
 };
 
+/** Statistics derived from line-item data in a full Shopify export. */
+export interface UnitStats {
+  typicalUnitPrice: number; // quantity-weighted median line-item price
+  ordersWithUnits: number; // orders carrying line-item data
+  unitShare: { single: number; double: number; threePlus: number }; // share of orders by item count, 0..1
+}
+
 /** A raw order parsed from the Shopify CSV. */
 export interface OrderRow {
   gross: number; // gross sale / cart value
   shippingPaid: number; // shipping actually paid at checkout (ground truth)
   rawService: string; // service string as it appears in the CSV
+  units?: number; // total line-item quantity (full Shopify export only)
 }
 
 /** An order after its rawService has been mapped to a canonical tier. */

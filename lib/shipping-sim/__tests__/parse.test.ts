@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseShippingOrders } from "@/lib/shipping-sim/parse";
+import type { UnitStats } from "@/lib/shipping-sim/types";
 
 describe("parseShippingOrders", () => {
   it("parses gross, shipping paid, and service, and lists distinct services", () => {
@@ -49,5 +50,108 @@ describe("parseShippingOrders", () => {
     const csv = ["Total,Shipping,Shipping Method", "100,5,"].join("\n");
     const r = parseShippingOrders(csv);
     expect(r.orders[0].rawService).toBe("Unknown");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Full-export (line-item) mode — contract tests (Task 1)
+// ---------------------------------------------------------------------------
+
+const FULL = [
+  "Name,Total,Shipping,Shipping Method,Lineitem quantity,Lineitem price",
+  "#1001,150.00,9.95,Standard Shipping,1,80.00",
+  "#1001,,,,2,30.00", // second line item of #1001 — continuation row
+  "#1002,90.00,9.95,Standard Shipping,1,90.00",
+  "#1003,300.00,0.00,Express Shipping,3,100.00",
+].join("\n");
+
+describe("parseShippingOrders — full-export mode", () => {
+  it("parses 3 orders (not 5 rows), groups continuation rows correctly", () => {
+    const r = parseShippingOrders(FULL);
+    expect(r.errors).toEqual([]);
+    expect(r.orders).toHaveLength(3);
+  });
+
+  it("#1001 has units:3 and gross 150", () => {
+    const r = parseShippingOrders(FULL);
+    const o1001 = r.orders.find((o) => o.rawService === "Standard Shipping" && o.gross === 150);
+    expect(o1001).toBeDefined();
+    expect(o1001!.units).toBe(3);
+  });
+
+  it("#1003 has units:3", () => {
+    const r = parseShippingOrders(FULL);
+    const o1003 = r.orders.find((o) => o.rawService === "Express Shipping");
+    expect(o1003).toBeDefined();
+    expect(o1003!.units).toBe(3);
+  });
+
+  it("services are sorted and distinct — no blank continuation row service", () => {
+    const r = parseShippingOrders(FULL);
+    expect(r.services).toEqual(["Express Shipping", "Standard Shipping"]);
+  });
+
+  it("no skipped-row warning for blank continuation rows", () => {
+    const r = parseShippingOrders(FULL);
+    const skipWarning = r.warnings.find((w) => w.toLowerCase().includes("skip"));
+    expect(skipWarning).toBeUndefined();
+  });
+
+  it("typicalUnitPrice is 90 (qty-weighted median of 80×1, 30×2, 90×1, 100×3)", () => {
+    const r = parseShippingOrders(FULL);
+    expect(r.unitStats).not.toBeNull();
+    expect((r.unitStats as UnitStats).typicalUnitPrice).toBe(90);
+  });
+
+  it("unitShare is {single:1/3, double:0, threePlus:2/3}", () => {
+    const r = parseShippingOrders(FULL);
+    const stats = r.unitStats as UnitStats;
+    expect(stats.ordersWithUnits).toBe(3);
+    expect(stats.unitShare.single).toBeCloseTo(1 / 3);
+    expect(stats.unitShare.double).toBeCloseTo(0);
+    expect(stats.unitShare.threePlus).toBeCloseTo(2 / 3);
+  });
+
+  it("order with every row having unparseable gross is skipped with a warning", () => {
+    const csvWithBadOrder = [
+      "Name,Total,Shipping,Shipping Method,Lineitem quantity,Lineitem price",
+      "#1001,150.00,9.95,Standard Shipping,1,80.00",
+      "#BADORDER,abc,5,Standard Shipping,1,50.00",
+      "#BADORDER,,,,,", // also bad
+    ].join("\n");
+    const r = parseShippingOrders(csvWithBadOrder);
+    expect(r.orders).toHaveLength(1);
+    expect(r.warnings.some((w) => w.includes("1"))).toBe(true); // 1 order skipped
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Summary mode — existing ParseResult gains unitStats: null
+// ---------------------------------------------------------------------------
+
+describe("parseShippingOrders — summary mode unitStats null", () => {
+  it("summary CSV returns unitStats: null", () => {
+    const csv = [
+      "Total,Shipping,Shipping Method",
+      "$120.00,$0.00,Standard",
+      "80,15,Express",
+    ].join("\n");
+    const r = parseShippingOrders(csv);
+    expect(r.unitStats).toBeNull();
+  });
+
+  it("summary CSV still parses orders identically to before", () => {
+    const csv = [
+      "Total,Shipping,Shipping Method",
+      "$120.00,$0.00,Standard",
+      "80,15,Express",
+      "200,0,Standard",
+    ].join("\n");
+    const r = parseShippingOrders(csv);
+    expect(r.errors).toEqual([]);
+    expect(r.orders).toHaveLength(3);
+    expect(r.orders[0]).toEqual({ gross: 120, shippingPaid: 0, rawService: "Standard" });
+    expect(r.orders[1]).toEqual({ gross: 80, shippingPaid: 15, rawService: "Express" });
+    expect(r.services).toEqual(["Express", "Standard"]);
   });
 });
