@@ -126,6 +126,33 @@ describe("parseShippingOrders — full-export mode", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Pinned-behaviour tests (Task 2 review follow-ups)
+// ---------------------------------------------------------------------------
+
+describe("parseShippingOrders — pinned parser behaviours", () => {
+  it("weighted median picks the lower middle unit for even total quantity", () => {
+    const csv = [
+      "Name,Total,Shipping,Shipping Method,Lineitem quantity,Lineitem price",
+      "#1,40.00,5.00,Standard,2,10.00",
+      "#2,220.00,5.00,Standard,2,100.00",
+    ].join("\n");
+    // totalQty=4, midpoint=ceil(4/2)=2; cumulative after price=10 pair is 2 >= 2 → lower median
+    expect(parseShippingOrders(csv).unitStats!.typicalUnitPrice).toBe(10);
+  });
+
+  it("orders with no parseable quantities still count toward ordersWithUnits (pinned behaviour)", () => {
+    const csv = [
+      "Name,Total,Shipping,Shipping Method,Lineitem quantity,Lineitem price",
+      "#1,40.00,5.00,Standard,abc,10.00",
+      "#2,90.00,5.00,Standard,1,90.00",
+    ].join("\n");
+    const s = parseShippingOrders(csv).unitStats!;
+    // Current convention: zero-unit orders stay in the denominator (ordersWithUnits = all grouped orders)
+    expect(s.ordersWithUnits).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Summary mode — existing ParseResult gains unitStats: null
 // ---------------------------------------------------------------------------
 
