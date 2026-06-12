@@ -238,12 +238,10 @@ export default function StepProposal({
   const abandon = Math.round(deferredAbandon * 100);
   const cogs = Math.round((deferredCogs ?? 0) * 100);
   const n = currentFacts?.orderCount ?? 0;
-  const windowClause = unitStats
-    ? `the basket window is auto-set to one unit (~$${Math.round(unitStats.typicalUnitPrice)}) from your line items`
-    : `within $${deferredWindow} below a new threshold`;
-  const assumptionEcho = unitStats
-    ? `Assumptions: ${uplift}% of orders just below a new threshold build baskets (applies to the Basket-builder and Competitor columns; the Net profit maximiser models price response only); the basket window is auto-set to one unit (~$${Math.round(unitStats.typicalUnitPrice)}) from your line items; ${abandon}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${cogs}%. Deltas are expected values vs the observed current baseline over ${n} orders.`
-    : `Assumptions: ${uplift}% of orders just below a new threshold build baskets (applies to the Basket-builder and Competitor columns; the Net profit maximiser models price response only); ${windowClause}; ${abandon}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${cogs}%. Deltas are expected values vs the observed current baseline over ${n} orders.`;
+  const windowPhrase = unitStats
+    ? `within one unit (~$${Math.round(unitStats.typicalUnitPrice)}, auto from your line items)`
+    : `within $${deferredWindow}`;
+  const assumptionEcho = `Assumptions: ${uplift}% of orders ${windowPhrase} below a new free-shipping threshold build baskets (applies to the Basket-builder and Competitor columns; the Net profit maximiser models price response only); ${abandon}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${cogs}%. Deltas are expected values vs the observed current baseline over ${n} orders.`;
 
   return (
     <div className="space-y-8">
