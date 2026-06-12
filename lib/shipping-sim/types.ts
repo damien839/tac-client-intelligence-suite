@@ -158,7 +158,7 @@ export interface BehavioralResult {
   };
 }
 
-export type RecommendationId = "profit-first" | "threshold-fee" | "basket-builder";
+export type RecommendationId = "net-profit" | "basket-builder";
 
 /** Behavioural metrics for one arbitrary candidate scheme (used for the Custom comparison column). */
 export interface SchemeEvaluation {
@@ -189,19 +189,21 @@ export interface ThresholdCurvePoint {
 /** One recommendation card. */
 export interface RecommendedScheme {
   id: RecommendationId;
-  label: string;
-  /** The tier this recommendation re-prices; fee/threshold refer to this tier. */
-  tier: CanonicalTier;
-  threshold: number | null; // recommended free-over for `tier` (null = flat)
-  fee: number; // fee for `tier` (= current fee for profit-first / basket-builder)
+  label: string; // "Net profit maximiser" | "Basket-builder"
+  /** The full candidate scheme — may change multiple tiers. */
+  scheme: Scheme;
+  /** Tiers whose fee or free threshold differ from the current scheme. */
+  changedTiers: CanonicalTier[];
   contributionDelta: number; // objective: shipping P&L delta + margin effects, vs current
   netShippingProfitDelta: number;
-  upliftMarginGain: number; // 0 for profit-first / threshold-fee
+  upliftMarginGain: number; // 0 for net-profit (uplift forced off)
   abandonMarginLoss: number;
+  expectedOrdersLost: number;
   freeOrderShare: number;
   recoveryRate: number;
-  expectedOrdersLost: number;
   unconstrained: boolean; // degeneracy guard tripped — see recommend.ts
   /** Optimum sits at the sweep limit — the true optimum may lie beyond the tested range. */
   capPinned: boolean;
+  /** Basket-builder only: "Free over $215 — your $140–$170 orders add one ~$45 unit to qualify." */
+  basketNarrative?: string;
 }

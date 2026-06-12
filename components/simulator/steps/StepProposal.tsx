@@ -73,8 +73,10 @@ export default function StepProposal({
     };
   }, [deferredCogs, deferredUplift, deferredWindow, deferredAbandon]);
 
+  // unitStats is passed as null for now — Task 4 wires the parsed unit stats through
+  // the wizard so the unit-driven basket sweep activates.
   const recs = useMemo(
-    () => (behavior ? recommendOptions(orders, currentScheme, behavior) : null),
+    () => (behavior ? recommendOptions(orders, currentScheme, behavior, null) : null),
     [orders, currentScheme, behavior]
   );
 
@@ -128,43 +130,41 @@ export default function StepProposal({
     [orders, currentScheme, behavior]
   );
 
-  // The three rec options: evaluated once per rec change, not on every Custom keystroke.
-  // Each rec re-prices its own tier (the dominant paid tier) — anchor on that tier's
-  // current config, never on standard.
+  // The rec options: evaluated once per rec change, not on every Custom keystroke.
+  // Task-3 mechanical bridge: each rec now carries a full multi-tier scheme; this
+  // summarises its first changed tier (or the dominant tier when nothing changed).
+  // Task 4 rewires the report to render every changed tier properly.
   const recReportOptions = useMemo<ReportOption[]>(() => {
     if (!behavior || !recs) return [];
     const result: ReportOption[] = [];
     for (const rec of recs) {
-      const anchor = currentScheme[rec.tier];
-      if (!anchor) continue;
-      const scheme: Scheme = {
-        ...currentScheme,
-        [rec.tier]: { ...anchor, fee: rec.fee, freeThreshold: rec.threshold },
-      };
-      // Profit-first / Optimised force uplift off (matching recommendOptions);
-      // Basket-builder uses the full behaviour params — so each evaluation reproduces
-      // the rec's deltas exactly.
+      const tier = rec.changedTiers[0] ?? dominantTier ?? "standard";
+      const tierConfig = rec.scheme[tier];
+      if (!tierConfig) continue;
+      // Net-profit forces uplift off (matching recommendOptions); basket-builder uses
+      // the full behaviour params — with unitStats null both reproduce the rec's
+      // deltas exactly.
       const params =
         rec.id === "basket-builder" ? behavior : { ...behavior, upliftRate: 0 };
-      const evaluation = evaluateScheme(orders, currentScheme, scheme, params);
+      const evaluation = evaluateScheme(orders, currentScheme, rec.scheme, params);
       if (evaluation) {
         result.push({
           key: rec.id,
           label: rec.label,
           shortLabel: OPTION_SHORT_LABELS[rec.id],
           color: OPTION_COLORS[rec.id],
-          schemeSummary: describeStandard(scheme[rec.tier]),
-          tier: rec.tier,
-          threshold: rec.threshold,
+          schemeSummary: describeStandard(rec.scheme[tier]),
+          tier,
+          threshold: tierConfig.freeThreshold,
           evaluation,
           unconstrained: rec.unconstrained,
           capPinned: rec.capPinned,
-          matchesCurrent: rec.fee === anchor.fee && rec.threshold === anchor.freeThreshold,
+          matchesCurrent: rec.changedTiers.length === 0,
         });
       }
     }
     return result;
-  }, [behavior, recs, orders, currentScheme]);
+  }, [behavior, recs, orders, currentScheme, dominantTier]);
 
   // Custom = Current per used tier (fee + free threshold)? Then it adds no information
   // and stays out of the verdict ranking.

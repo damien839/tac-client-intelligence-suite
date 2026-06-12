@@ -20,15 +20,13 @@ export interface ReportOption {
 }
 
 export const OPTION_SHORT_LABELS: Record<OptionKey, string> = {
-  "profit-first": "Profit",
-  "threshold-fee": "Optimised",
+  "net-profit": "Net profit",
   "basket-builder": "Basket",
   custom: "Custom",
 };
 
 export const OPTION_COLORS: Record<OptionKey, string> = {
-  "profit-first": "#F5B36B",
-  "threshold-fee": "#6088aa",
+  "net-profit": "#F5B36B",
   "basket-builder": "#4ADE80",
   custom: "#C084FC",
 };

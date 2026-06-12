@@ -1,7 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { bucketOrders, dominantPaidTier, prepareBuckets, behavioralScenario, recommendOptions, thresholdCandidates, evaluateScheme, thresholdCurves } from "@/lib/shipping-sim/recommend";
-import { proposedScenario, currentScenario } from "@/lib/shipping-sim/model";
-import { BehaviorParams, CanonicalTier, Scheme, TaggedOrder } from "@/lib/shipping-sim/types";
+import { proposedScenario } from "@/lib/shipping-sim/model";
+import {
+  BehaviorParams,
+  CANONICAL_TIERS,
+  CanonicalTier,
+  RecommendedScheme,
+  Scheme,
+  TaggedOrder,
+  UnitStats,
+} from "@/lib/shipping-sim/types";
 
 function o(gross: number, tier: CanonicalTier): TaggedOrder {
   return { gross, shippingPaid: 0, rawService: "x", tier };
@@ -236,81 +244,232 @@ describe("recommendOptions", () => {
     cogsPercent: 0.4,
     upliftRate: 0.3,
     upliftWindow: 20,
-    abandonRate: 0,
+    abandonRate: 0.1,
   };
 
-  it("targets the dominant paid tier when standard is absent", () => {
-    // express-only scheme: one paying express order → dominant = express → 3 express recs.
-    const expressOnly: Scheme = {
-      express: { tier: "express", fee: 15, freeThreshold: 200, avgCost: 12 },
-    };
-    const recs = recommendOptions([o(80, "express")], expressOnly, behavior);
-    expect(recs).toHaveLength(3);
-    expect(recs.every((r) => r.tier === "express")).toBe(true);
+  /** Every changed tier's config differs from current; every unchanged tier's matches. */
+  function expectChangedTiersConsistent(rec: RecommendedScheme, cur: Scheme) {
+    for (const tier of CANONICAL_TIERS) {
+      const a = cur[tier];
+      const b = rec.scheme[tier];
+      if (!a && !b) {
+        expect(rec.changedTiers).not.toContain(tier);
+        continue;
+      }
+      const differs = !a || !b || a.fee !== b.fee || a.freeThreshold !== b.freeThreshold;
+      expect(rec.changedTiers.includes(tier)).toBe(differs);
+    }
+  }
+
+  // Two-tier fixture where shifting freight pays: express loses $18/order today
+  // (fee $12, carrier cost $30) while standard makes $5 — pushing express volume
+  // onto standard is the profitable move the multi-tier sweep must find.
+  const shiftCurrent: Scheme = {
+    standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 5 },
+    express: { tier: "express", fee: 12, freeThreshold: null, avgCost: 30 },
+  };
+  const shiftOrders: TaggedOrder[] = [
+    o(50, "standard"),
+    o(50, "standard"),
+    ...Array.from({ length: 20 }, () => o(80, "express")),
+  ];
+  const shiftBehavior: BehaviorParams = {
+    cogsPercent: 0.3,
+    upliftRate: 0.3,
+    upliftWindow: 20,
+    abandonRate: 0.1,
+  };
+
+  it("returns exactly [net-profit, basket-builder] with consistent changedTiers", () => {
+    const recs = recommendOptions(shiftOrders, shiftCurrent, shiftBehavior, null);
+    expect(recs.map((r) => r.id)).toEqual(["net-profit", "basket-builder"]);
+    expect(recs[0].label).toBe("Net profit maximiser");
+    expect(recs[1].label).toBe("Basket-builder");
+    for (const rec of recs) expectChangedTiersConsistent(rec, shiftCurrent);
   });
 
   it("returns [] when there are no analysable orders", () => {
-    expect(recommendOptions([], current, behavior)).toEqual([]);
+    expect(recommendOptions([], current, behavior, null)).toEqual([]);
   });
 
-  it("profit-first matches a brute-force sweep of the same candidates (behaviour zeroed)", () => {
-    const orders = [
-      o(80, "standard"),
-      o(150, "standard"),
-      o(150, "express"),
-      o(250, "express"),
-      o(60, "standard"),
+  it("net-profit re-prices express and shifts freight onto standard when that pays", () => {
+    const np = recommendOptions(shiftOrders, shiftCurrent, shiftBehavior, null).find(
+      (r) => r.id === "net-profit"
+    )!;
+    expect(np.changedTiers).toContain("express");
+    // Hand-verified floor: expFee 14 alone moves all 20 express orders to standard
+    // (revealed premium $2 < stay premium $4); each goes from -$18 to +$5 net with no
+    // abandonment (landed fee $10 < current $12) -> +$460. The sweep must do at least
+    // that well (that candidate is on the coarse grid).
+    expect(np.contributionDelta).toBeGreaterThanOrEqual(460 - 1e-9);
+    // Metrics agree with evaluateScheme on the winning scheme (uplift forced off).
+    const ev = evaluateScheme(shiftOrders, shiftCurrent, np.scheme, {
+      ...shiftBehavior,
+      upliftRate: 0,
+    })!;
+    expect(ev.contributionDelta).toBeCloseTo(np.contributionDelta);
+    expect(ev.netShippingProfitDelta).toBeCloseTo(np.netShippingProfitDelta);
+    // Freight shift is visible: more volume lands on standard than the current 2 orders.
+    const currentFacts = evaluateScheme(shiftOrders, shiftCurrent, shiftCurrent, {
+      ...shiftBehavior,
+      upliftRate: 0,
+    })!;
+    expect(currentFacts.volumeByTier.standard).toBeCloseTo(2);
+    expect(ev.volumeByTier.standard).toBeGreaterThan(currentFacts.volumeByTier.standard);
+  });
+
+  it("net-profit winner beats every sampled coarse candidate (refine-pass sanity)", () => {
+    const np = recommendOptions(shiftOrders, shiftCurrent, shiftBehavior, null).find(
+      (r) => r.id === "net-profit"
+    )!;
+    const noUplift = { ...shiftBehavior, upliftRate: 0 };
+    const sample = (
+      std: { fee: number; t: number | null },
+      exp: { fee: number; t: number | null }
+    ): number =>
+      evaluateScheme(
+        shiftOrders,
+        shiftCurrent,
+        {
+          standard: { ...shiftCurrent.standard!, fee: std.fee, freeThreshold: std.t },
+          express: { ...shiftCurrent.express!, fee: exp.fee, freeThreshold: exp.t },
+        },
+        noUplift
+      )!.contributionDelta;
+    const samples = [
+      sample({ fee: 10, t: 100 }, { fee: 12, t: null }), // current
+      sample({ fee: 10, t: 100 }, { fee: 20, t: null }),
+      sample({ fee: 30, t: 100 }, { fee: 30, t: null }),
+      sample({ fee: 10, t: null }, { fee: 12, t: null }),
+      sample({ fee: 20, t: 200 }, { fee: 24, t: null }),
+      sample({ fee: 0, t: 0 }, { fee: 0, t: null }),
     ];
-    const baseline = currentScenario(orders, current).netShippingProfit;
-    let bestDelta = -Infinity;
-    for (const t of thresholdCandidates(orders)) {
-      const cand: Scheme = {
-        ...current,
-        standard: { ...current.standard!, freeThreshold: t },
-      };
-      const delta = proposedScenario(orders, current, cand).netShippingProfit - baseline;
-      if (delta > bestDelta) bestDelta = delta;
+    for (const delta of samples) {
+      expect(np.contributionDelta).toBeGreaterThanOrEqual(delta - 1e-9);
     }
-    const a = recommendOptions(orders, current, behavior).find((r) => r.id === "profit-first")!;
-    // abandonRate 0 and uplift forced off for profit-first -> contribution = shipping delta
-    expect(a.contributionDelta).toBeCloseTo(bestDelta);
-    expect(a.upliftMarginGain).toBe(0);
   });
 
-  it("computes the three cards on a single-tier fixture (hand-verified)", () => {
-    // Current: std fee $10, FLAT (no threshold), cost $7. One order, gross $185 (pays $10 today).
-    // Baseline net = 10 - 7 = 3.
+  // Damo-shaped book: std $30 free over $250 (cost $25); express $60 flat (cost $55);
+  // 12 free standard orders 260..700, 3 paying standard, 45 express 110..594.
+  const damoCurrent: Scheme = {
+    standard: { tier: "standard", fee: 30, freeThreshold: 250, avgCost: 25 },
+    express: { tier: "express", fee: 60, freeThreshold: null, avgCost: 55 },
+  };
+  const damoOrders: TaggedOrder[] = [
+    ...Array.from({ length: 12 }, (_, i) => o(260 + i * 40, "standard")), // free std
+    o(80, "standard"),
+    o(140, "standard"),
+    o(200, "standard"), // paying std
+    ...Array.from({ length: 45 }, (_, i) => o(110 + i * 11, "express")), // pay $60 flat
+  ];
+  const damoBehavior: BehaviorParams = {
+    cogsPercent: 0.3,
+    upliftRate: 0.3,
+    upliftWindow: 20,
+    abandonRate: 0.1,
+  };
+  const damoUnits: UnitStats = {
+    typicalUnitPrice: 45,
+    ordersWithUnits: 60,
+    unitShare: { single: 0.4, double: 0.35, threePlus: 0.25 },
+  };
+
+  it("finds the profitable express->standard freight shift on the Damo-shaped book", () => {
+    const recs = recommendOptions(damoOrders, damoCurrent, damoBehavior, damoUnits);
+    expect(recs.map((r) => r.id)).toEqual(["net-profit", "basket-builder"]);
+    const [np, bb] = recs;
+    // Computed optimum (verified independently via evaluateScheme): price express off
+    // the menu (expFee pins at the $120 cap) and capture its volume on standard at a
+    // fee just below the current $60 express fee — switchers are better off (no
+    // abandonment) while per-order margin jumps from $5 to ~$34, net of the free-band
+    // losses the higher standard threshold creates. Both paid tiers change.
+    expect(np.contributionDelta).toBeGreaterThan(0);
+    expect(np.changedTiers).toContain("express");
+    for (const t of np.changedTiers) expect(["standard", "express"]).toContain(t);
+    // The fee cap binds, and the guard says so.
+    expect(np.capPinned).toBe(true);
+    expect(np.unconstrained).toBe(false); // abandonment is live
+    // Metrics agree with an independent evaluation of the winning scheme.
+    const noUpliftCheck = { ...damoBehavior, upliftRate: 0 };
+    const ev = evaluateScheme(damoOrders, damoCurrent, np.scheme, noUpliftCheck)!;
+    expect(ev.contributionDelta).toBeCloseTo(np.contributionDelta);
+    // Freight-shift accounting is visible: express volume moves onto standard.
+    const currentFacts = evaluateScheme(damoOrders, damoCurrent, damoCurrent, noUpliftCheck)!;
+    expect(currentFacts.volumeByTier.standard).toBeCloseTo(15); // 12 free + 3 paying
+    expect(ev.volumeByTier.standard).toBeGreaterThan(currentFacts.volumeByTier.standard);
+    expect(ev.volumeByTier.express).toBeLessThan(currentFacts.volumeByTier.express);
+    // The winner beats hand-picked aggressive candidates.
+    const noUplift = { ...damoBehavior, upliftRate: 0 };
+    const probe = (
+      std: { fee: number; t: number | null },
+      exp: { fee: number; t: number | null }
+    ): number =>
+      evaluateScheme(
+        damoOrders,
+        damoCurrent,
+        {
+          standard: { ...damoCurrent.standard!, fee: std.fee, freeThreshold: std.t },
+          express: { ...damoCurrent.express!, fee: exp.fee, freeThreshold: exp.t },
+        },
+        noUplift
+      )!.contributionDelta;
+    const probes = [
+      probe({ fee: 30, t: 250 }, { fee: 60, t: null }), // current -> 0
+      probe({ fee: 40, t: 250 }, { fee: 60, t: null }),
+      probe({ fee: 48, t: 250 }, { fee: 80, t: null }),
+      probe({ fee: 30, t: 600 }, { fee: 60, t: null }),
+      probe({ fee: 30, t: null }, { fee: 60, t: null }),
+      probe({ fee: 30, t: 250 }, { fee: 60, t: 215 }),
+      probe({ fee: 30, t: 250 }, { fee: 58, t: null }),
+      probe({ fee: 58, t: 540 }, { fee: 120, t: null }), // near the computed optimum
+    ];
+    for (const delta of probes) {
+      expect(np.contributionDelta).toBeGreaterThanOrEqual(delta - 1e-9);
+    }
+    // No dense $10-bin cluster exists in this book (all bins hold <3 orders), so the
+    // unit-driven basket sweep has no candidates: keep current, no narrative.
+    expect(bb.changedTiers).toEqual([]);
+    expect(bb.contributionDelta).toBeCloseTo(0);
+    expect(bb.basketNarrative).toBeUndefined();
+  });
+
+  it("single-used-tier data degrades net-profit to the old 2D threshold x fee sweep (hand-verified)", () => {
+    // Current: std fee $10, FLAT, cost $7. One order, gross $185 (pays $10 today).
+    // Baseline net = 10 - 7 = 3. With no abandonment revenue is monotone in fee ->
+    // pins at maxFee = max(2*10, 30) = 30. At fee=30, T=190 keeps the order paying:
+    // delta (30-7)-3 = 20. Fee-major grid + strict > -> lowest fee then lowest
+    // threshold among ties -> fee 30, T 190. unconstrained (abandon 0) + capPinned.
     const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 } };
     const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 1, upliftWindow: 20, abandonRate: 0 };
-    const recs = recommendOptions([o(185, "standard")], cur, b);
-    const a = recs.find((r) => r.id === "profit-first")!;
-    const tf = recs.find((r) => r.id === "threshold-fee")!;
-    const bb = recs.find((r) => r.id === "basket-builder")!;
+    const np = recommendOptions([o(185, "standard")], cur, b, null).find(
+      (r) => r.id === "net-profit"
+    )!;
+    expect(np.scheme.standard!.fee).toBe(30);
+    expect(np.scheme.standard!.freeThreshold).toBe(190);
+    expect(np.changedTiers).toEqual(["standard"]);
+    expect(np.contributionDelta).toBeCloseTo(20);
+    expect(np.upliftMarginGain).toBe(0); // uplift forced off
+    expect(np.unconstrained).toBe(true);
+    expect(np.capPinned).toBe(true);
+  });
 
-    // A (uplift off): any T <= 185 makes the order free (revenue 0, delta (0-7)-3 = -10);
-    // T = 190 keeps it paying (pays 10, delta (10-7)-3 = 0). Ties prefer lowest threshold
-    // -> 190. freeOrderShare=0 -> unconstrained flag (abandonment 0, charges everyone).
-    expect(a.threshold).toBe(190);
-    expect(a.contributionDelta).toBeCloseTo(0);
-    expect(a.unconstrained).toBe(true);
-
-    // B: with no abandonment, revenue is monotone in fee -> pins at maxFee = max(2*10,30) = 30.
-    // At fee=30, T=190: pays 30, delta = (30-7)-3 = 20. unconstrained (fee=maxFee, abandon=0).
-    expect(tf.fee).toBe(30);
-    expect(tf.threshold).toBe(190);
-    expect(tf.contributionDelta).toBeCloseTo(20); // (30-7) - (10-7)
-    expect(tf.unconstrained).toBe(true);
-    expect(tf.capPinned).toBe(true); // fee === maxFee
-
-    // C (uplift on): current is FLAT so any candidate threshold creates a NEW window.
-    // At T=200: order in window [180,200), buildWeight=1 (upliftRate=1), alreadyInWindow=false.
-    //   shippingRevenue=0, carrierSpend=7, upliftMarginGain=(200-185)*0.8=12
-    //   delta = (0-7)-3 + 12 = +2. Beats every paying candidate (delta 0).
-    // freeOrderShare=1 (builder ships free) -> unconstrained=false (interior optimum).
-    expect(bb.threshold).toBe(200);
+  it("basket-builder without unitStats runs the slider sweep on the dominant tier (hand-verified)", () => {
+    // Same fixture, uplift on (rate 1, window $20): at T=200 the $185 order builds —
+    // ships free, gains (200-185)*0.8 = $12 margin; delta = (0-7)-3+12 = +2. Beats
+    // every paying candidate (delta 0). Fee stays at current ($10). No narrative.
+    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 } };
+    const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 1, upliftWindow: 20, abandonRate: 0 };
+    const bb = recommendOptions([o(185, "standard")], cur, b, null).find(
+      (r) => r.id === "basket-builder"
+    )!;
+    expect(bb.scheme.standard!.fee).toBe(10);
+    expect(bb.scheme.standard!.freeThreshold).toBe(200);
+    expect(bb.changedTiers).toEqual(["standard"]);
     expect(bb.contributionDelta).toBeCloseTo(2);
     expect(bb.upliftMarginGain).toBeCloseTo(12);
     expect(bb.unconstrained).toBe(false);
+    expect(bb.capPinned).toBe(false);
+    expect(bb.basketNarrative).toBeUndefined();
   });
 
   it("does not flag unconstrained when abandonment is set", () => {
@@ -322,41 +481,31 @@ describe("recommendOptions", () => {
       upliftWindow: 20,
       abandonRate: 0.5,
     };
-    const a = recommendOptions(orders, cur, withAbandon).find((r) => r.id === "profit-first")!;
-    expect(a.unconstrained).toBe(false);
-    // T=100 (the current scheme) is always a candidate, so the optimum is never negative.
-    expect(a.contributionDelta).toBeGreaterThanOrEqual(0);
+    const np = recommendOptions(orders, cur, withAbandon, null).find(
+      (r) => r.id === "net-profit"
+    )!;
+    expect(np.unconstrained).toBe(false);
+    // The current config (T=100, fee=10) is always a candidate, so never negative.
+    expect(np.contributionDelta).toBeGreaterThanOrEqual(0);
   });
 
   it("flags unconstrained when the basket-builder optimum pins at the sweep cap", () => {
     // Order at $995 with a tiny $2 fee: building to T=1000 gains (1000-995)*0.8 = $4
-    // of margin vs $2 of fee revenue under flat — so C pins at the $1000 cap. The
-    // ideal threshold lies beyond the cap, so the optimum must be flagged.
+    // of margin vs $2 of fee revenue — so the fallback sweep pins at the $1000 cap.
     const cur: Scheme = { standard: { tier: "standard", fee: 2, freeThreshold: 100, avgCost: 3 } };
     const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 1, upliftWindow: 20, abandonRate: 0 };
-    const recs = recommendOptions(Array.from({ length: 20 }, () => o(995, "standard")), cur, b);
+    const recs = recommendOptions(Array.from({ length: 20 }, () => o(995, "standard")), cur, b, null);
     const bb = recs.find((r) => r.id === "basket-builder")!;
-    expect(bb.threshold).toBe(1000);
+    expect(bb.scheme.standard!.freeThreshold).toBe(1000);
     expect(bb.unconstrained).toBe(true);
+    expect(bb.capPinned).toBe(true);
   });
 
-  it("sets capPinned=true when the fee optimum pins at the fee cap with non-zero abandonment", () => {
-    // Current: std fee $30, free over $250, cost $7.
-    // Five orders at gross [100, 120, 140, 160, 180] — all below T=250, all paying $30 today.
-    // behavior: cogsPercent 0.3, upliftRate 0, upliftWindow 20, abandonRate 0.01.
-    // maxFee = ceil(max(2*30, 30)) = 60.
-    //
-    // Working at fee=60, Δ=30, abandonProb = 0.01*(30/10) = 0.03:
-    //   shippingRevenue  = 5 × 0.97 × 60 = 291
-    //   carrierSpend     = 5 × 0.97 × 7  = 33.95
-    //   netShippingProfit = 257.05; baseline = 5×(30-7) = 115
-    //   abandonMarginLoss = 0.03 × 0.7 × 700 = 14.7
-    //   contributionDelta = 257.05 - 115 - 14.7 = 127.35
-    //
-    // At fee=59, Δ=29, abandonProb=0.029:
-    //   contributionDelta ≈ 123.25  →  fee=60 strictly better → optimum pins at cap.
-    //
-    // Since abandonRate > 0: unconstrained=false, but capPinned=true (fee===maxFee).
+  it("sets capPinned=true when the net-profit fee optimum pins at the fee cap with non-zero abandonment", () => {
+    // Single used tier -> old 2D sweep. std fee $30, free over $250, cost $7; five
+    // orders 100..180 all paying $30 today; abandonRate 0.01. maxFee = 60; revenue
+    // beats abandonment loss all the way up -> the optimum pins at fee=60 (hand-
+    // verified in the v3 test this ports: delta 127.35 at fee 60 vs 123.25 at 59).
     const cur: Scheme = {
       standard: { tier: "standard", fee: 30, freeThreshold: 250, avgCost: 7 },
     };
@@ -373,32 +522,22 @@ describe("recommendOptions", () => {
       o(160, "standard"),
       o(180, "standard"),
     ];
-    const tf = recommendOptions(orders, cur, b).find((r) => r.id === "threshold-fee")!;
-    expect(tf.fee).toBe(60); // pins at the cap
-    expect(tf.unconstrained).toBe(false); // abandonRate > 0 → not unconstrained
-    expect(tf.capPinned).toBe(true); // fee === maxFee → true optimum may lie beyond
-  });
-
-  it("sets capPinned=false for the hand-verified single-tier case (interior optimum)", () => {
-    // Reuse the updated single-tier fixture: FLAT current, candidate T=200, fee=10.
-    // The basket-builder optimum lands at T=200 (interior, well below maxThreshold=400)
-    // with fee=10 (unchanged). capPinned must be false.
-    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 } };
-    const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 1, upliftWindow: 20, abandonRate: 0 };
-    const recs = recommendOptions([o(185, "standard")], cur, b);
-    const bb = recs.find((r) => r.id === "basket-builder")!;
-    expect(bb.threshold).toBe(200);
-    expect(bb.capPinned).toBe(false); // threshold 200 < maxThreshold 400
+    const np = recommendOptions(orders, cur, b, null).find((r) => r.id === "net-profit")!;
+    expect(np.scheme.standard!.fee).toBe(60); // pins at the cap
+    expect(np.unconstrained).toBe(false); // abandonRate > 0
+    expect(np.capPinned).toBe(true);
   });
 
   it("rounds the fee sweep ceiling up so the fee-pin guard works for non-integer fees", () => {
     // std fee 16.55 -> ceiling ceil(33.1) = 34. With abandonment 0, revenue is
-    // monotone in fee, so threshold-fee pins at 34 and must be flagged.
+    // monotone in fee, so net-profit pins at 34 and must be flagged.
     const cur: Scheme = { standard: { tier: "standard", fee: 16.55, freeThreshold: 100, avgCost: 7 } };
     const noAbandon: BehaviorParams = { cogsPercent: 0.5, upliftRate: 0, upliftWindow: 20, abandonRate: 0 };
-    const tf = recommendOptions([o(80, "standard")], cur, noAbandon).find((r) => r.id === "threshold-fee")!;
-    expect(tf.fee).toBe(34);
-    expect(tf.unconstrained).toBe(true);
+    const np = recommendOptions([o(80, "standard")], cur, noAbandon, null).find(
+      (r) => r.id === "net-profit"
+    )!;
+    expect(np.scheme.standard!.fee).toBe(34);
+    expect(np.unconstrained).toBe(true);
   });
 
   it("excludes orders whose tier is not in the current scheme", () => {
@@ -406,39 +545,99 @@ describe("recommendOptions", () => {
     const withStray = recommendOptions(
       [o(80, "standard"), o(120, "nextday" as CanonicalTier)],
       stdOnly,
-      behavior
+      behavior,
+      null
     );
-    const without = recommendOptions([o(80, "standard")], stdOnly, behavior);
+    const without = recommendOptions([o(80, "standard")], stdOnly, behavior, null);
     expect(withStray).toEqual(without);
   });
 
-  it("returns zero deltas without crashing when every order ships free under every candidate", () => {
-    // Fee 0 everywhere -> every candidate is free for everyone -> all deltas 0.
+  it("handles an all-free current scheme without crashing (basket fallback stays at zero)", () => {
+    // Fee 0 everywhere -> every basket threshold candidate is free for everyone.
     const freeScheme: Scheme = { standard: { tier: "standard", fee: 0, freeThreshold: null, avgCost: 7 } };
-    const a = recommendOptions([o(80, "standard")], freeScheme, behavior).find(
-      (r) => r.id === "profit-first"
-    )!;
-    expect(a.contributionDelta).toBe(0);
-    expect(a.netShippingProfitDelta).toBe(0);
+    const recs = recommendOptions([o(80, "standard")], freeScheme, behavior, null);
+    expect(recs).toHaveLength(2);
+    const bb = recs.find((r) => r.id === "basket-builder")!;
+    expect(bb.contributionDelta).toBeCloseTo(0);
   });
 
-  it("re-prices the express tier when express carries the paid volume", () => {
-    // 80% express at a flat fee, standard mostly free: the optimizer must target express.
-    const shape: Scheme = {
-      standard: { tier: "standard", fee: 30, freeThreshold: 250, avgCost: 25 },
-      express: { tier: "express", fee: 60, freeThreshold: null, avgCost: 55 },
+  it("targets the dominant paid tier when standard is absent", () => {
+    const expressOnly: Scheme = {
+      express: { tier: "express", fee: 15, freeThreshold: 200, avgCost: 12 },
     };
-    const orders = [
-      ...Array.from({ length: 10 }, (_, i) => o(260 + i * 40, "standard")), // free (above 250)
-      ...Array.from({ length: 40 }, (_, i) => o(120 + i * 10, "express")), // pay $60 flat
+    const recs = recommendOptions([o(80, "express")], expressOnly, behavior, null);
+    expect(recs).toHaveLength(2);
+    for (const rec of recs) {
+      for (const t of rec.changedTiers) expect(t).toBe("express");
+      expect(rec.scheme.standard).toBeUndefined();
+    }
+  });
+
+  it("basket-builder derives the threshold from order clusters plus one typical unit", () => {
+    // Dense cluster 140-170 (20 orders) -> candidate 170 + $45 = $215. Four paying
+    // orders at 175/185 sit within one $45 unit of 215 (but OUTSIDE the $20 slider
+    // window) and build with weight 0.3: margin gain 0.3*0.7*(40*2 + 30*2) = $29.4
+    // against $12 of lost fees (4 x 0.3 x $10) -> delta +$17.4 > 0, so 215 wins.
+    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 } };
+    const orders: TaggedOrder[] = [
+      ...Array.from({ length: 7 }, () => o(145, "standard")),
+      ...Array.from({ length: 7 }, () => o(155, "standard")),
+      ...Array.from({ length: 6 }, () => o(165, "standard")),
+      o(175, "standard"),
+      o(175, "standard"),
+      o(185, "standard"),
+      o(185, "standard"),
     ];
+    const units: UnitStats = {
+      typicalUnitPrice: 45,
+      ordersWithUnits: 24,
+      unitShare: { single: 0.5, double: 0.3, threePlus: 0.2 },
+    };
     const b: BehaviorParams = { cogsPercent: 0.3, upliftRate: 0.3, upliftWindow: 20, abandonRate: 0.1 };
-    const recs = recommendOptions(orders, shape, b);
-    expect(recs).toHaveLength(3);
-    expect(recs.every((r) => r.tier === "express")).toBe(true);
-    // The express sweep must actually consider non-current configs: at least assert the
-    // candidate space moved off the flat-$60 anchor for some option OR deltas are >= 0.
-    for (const r of recs) expect(r.contributionDelta).toBeGreaterThanOrEqual(0);
+    const bb = recommendOptions(orders, cur, b, units).find((r) => r.id === "basket-builder")!;
+    expect(bb.scheme.standard!.freeThreshold).toBe(215);
+    expect(bb.scheme.standard!.fee).toBe(10); // fees unchanged
+    expect(bb.changedTiers).toEqual(["standard"]);
+    expect(bb.upliftMarginGain).toBeCloseTo(29.4);
+    expect(bb.contributionDelta).toBeCloseTo(17.4);
+    // Narrative names the threshold, the source cluster, and the unit price.
+    expect(bb.basketNarrative).toContain("$215");
+    expect(bb.basketNarrative).toContain("$140");
+    expect(bb.basketNarrative).toContain("$170");
+    expect(bb.basketNarrative).toContain("one");
+    expect(bb.basketNarrative).toContain("45");
+    // Window override proof: under the $20 slider window nothing builds at T=215 —
+    // the 175/185 orders only build inside the $45 unit window.
+    expect(evaluateScheme(orders, cur, bb.scheme, b)!.upliftMarginGain).toBe(0);
+    expect(
+      evaluateScheme(orders, cur, bb.scheme, { ...b, upliftWindow: 45 })!.contributionDelta
+    ).toBeCloseTo(bb.contributionDelta);
+  });
+
+  it("basket-builder without unitStats matches a direct slider-window sweep on the dominant tier", () => {
+    const orders = [
+      o(80, "standard"),
+      o(150, "standard"),
+      o(150, "express"),
+      o(250, "express"),
+      o(60, "standard"),
+    ];
+    const b: BehaviorParams = { cogsPercent: 0.4, upliftRate: 0.3, upliftWindow: 20, abandonRate: 0.1 };
+    const bb = recommendOptions(orders, current, b, null).find((r) => r.id === "basket-builder")!;
+    const tier = dominantPaidTier(orders, current)!;
+    let bestT: number | null | undefined;
+    let bestDelta = -Infinity;
+    for (const t of thresholdCandidates(orders)) {
+      const cand: Scheme = { ...current, [tier]: { ...current[tier]!, freeThreshold: t } };
+      const delta = evaluateScheme(orders, current, cand, b)!.contributionDelta;
+      if (delta > bestDelta) {
+        bestDelta = delta;
+        bestT = t;
+      }
+    }
+    expect(bb.scheme[tier]!.freeThreshold).toBe(bestT);
+    expect(bb.scheme[tier]!.fee).toBe(current[tier]!.fee);
+    expect(bb.contributionDelta).toBeCloseTo(bestDelta);
   });
 });
 
@@ -483,12 +682,10 @@ describe("evaluateScheme", () => {
       o(60, "standard"),
     ];
     const b: BehaviorParams = { cogsPercent: 0.4, upliftRate: 0.3, upliftWindow: 20, abandonRate: 0.1 };
-    const bb = recommendOptions(orders, current, b).find((r) => r.id === "basket-builder")!;
-    const candidate: Scheme = {
-      ...current,
-      [bb.tier]: { ...current[bb.tier]!, fee: bb.fee, freeThreshold: bb.threshold },
-    };
-    const e = evaluateScheme(orders, current, candidate, b)!;
+    // No unitStats -> basket-builder evaluates with the caller's slider window, so a
+    // plain evaluateScheme of its winning scheme must reproduce the metrics exactly.
+    const bb = recommendOptions(orders, current, b, null).find((r) => r.id === "basket-builder")!;
+    const e = evaluateScheme(orders, current, bb.scheme, b)!;
     expect(e.contributionDelta).toBeCloseTo(bb.contributionDelta);
     expect(e.netShippingProfitDelta).toBeCloseTo(bb.netShippingProfitDelta);
     expect(e.upliftMarginGain).toBeCloseTo(bb.upliftMarginGain);
