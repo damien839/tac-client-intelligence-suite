@@ -6,42 +6,54 @@ import InputField from "@/components/shared/InputField";
 import OptionsComparison from "../OptionsComparison";
 import ComparisonReport from "../ComparisonReport";
 import ReconciliationBadge from "../analysis/ReconciliationBadge";
-import { describeStandard } from "../analysis/format";
 import {
   OPTION_COLORS,
   OPTION_SHORT_LABELS,
+  OptionKey,
   ReportOption,
 } from "../report/types";
 import {
+  changedTiersOf,
   dominantPaidTier,
   evaluateScheme,
   recommendOptions,
   thresholdCurves,
 } from "@/lib/shipping-sim/recommend";
+import { segmentOrders, segmentOutcomes } from "@/lib/shipping-sim/segments";
 import {
   BehaviorParams,
   CanonicalTier,
   Reconciliation,
   Scheme,
+  SegmentOutcome,
   TaggedOrder,
+  UnitStats,
 } from "@/lib/shipping-sim/types";
 
 interface StepProposalProps {
   orders: TaggedOrder[];
   usedTiers: CanonicalTier[];
+  /** Line-item stats from a full Shopify export — null in summary mode. */
+  unitStats: UnitStats | null;
   tierVals: Partial<Record<CanonicalTier, { fee: number; freeThreshold: number | null }>>;
   cogsPercent: number | undefined;
   monthlyOrders: number | undefined;
   currentScheme: Scheme;
-  proposedScheme: Scheme; // the Custom scheme, built from tierVals by the wizard
+  proposedScheme: Scheme; // the Competitor benchmark scheme, built from tierVals by the wizard
   onChange: (tier: CanonicalTier, patch: { fee?: number; freeThreshold?: number | null }) => void;
   onCogsChange: (value: number | undefined) => void;
   onMonthlyOrdersChange: (value: number | undefined) => void;
 }
 
+/** The behaviour params each option's evaluation runs with: net-profit forces uplift off. */
+function paramsForOption(key: OptionKey, behavior: BehaviorParams): BehaviorParams {
+  return key === "net-profit" ? { ...behavior, upliftRate: 0 } : behavior;
+}
+
 export default function StepProposal({
   orders,
   usedTiers,
+  unitStats,
   tierVals,
   cogsPercent,
   monthlyOrders,
@@ -57,30 +69,33 @@ export default function StepProposal({
 
   // Defer the sweep inputs so typing stays responsive while the grids recompute.
   const deferredCogs = useDeferredValue(cogsPercent);
-  // Deferred so large-file recomputes (rec evaluations) don't run inside the Custom keystroke render.
+  // Deferred so large-file recomputes (rec evaluations) don't run inside the Competitor keystroke render.
   const deferredProposedScheme = useDeferredValue(proposedScheme);
   const deferredUplift = useDeferredValue(upliftRate);
   const deferredWindow = useDeferredValue(upliftWindow);
   const deferredAbandon = useDeferredValue(abandonRate);
+
+  // With line-item data the uplift window is the typical unit price ("one more unit
+  // gets you there") for every behavioural evaluation; the slider only drives it in
+  // summary mode, where it is the merchant's estimate of a unit.
+  const effectiveWindow = unitStats ? unitStats.typicalUnitPrice : deferredWindow;
 
   const behavior = useMemo<BehaviorParams | null>(() => {
     if (deferredCogs === undefined) return null;
     return {
       cogsPercent: deferredCogs,
       upliftRate: deferredUplift,
-      upliftWindow: deferredWindow,
+      upliftWindow: effectiveWindow,
       abandonRate: deferredAbandon,
     };
-  }, [deferredCogs, deferredUplift, deferredWindow, deferredAbandon]);
+  }, [deferredCogs, deferredUplift, effectiveWindow, deferredAbandon]);
 
-  // unitStats is passed as null for now — Task 4 wires the parsed unit stats through
-  // the wizard so the unit-driven basket sweep activates.
   const recs = useMemo(
-    () => (behavior ? recommendOptions(orders, currentScheme, behavior, null) : null),
-    [orders, currentScheme, behavior]
+    () => (behavior ? recommendOptions(orders, currentScheme, behavior, unitStats) : null),
+    [orders, currentScheme, behavior, unitStats]
   );
 
-  // The tier the recommendation sweeps re-price — drives labels and the "Now" markers.
+  // The tier carrying most paid volume — drives the sensitivity sweep and "Now" markers.
   const dominantTier = useMemo(() => dominantPaidTier(orders, currentScheme), [orders, currentScheme]);
 
   const customEval = useMemo(
@@ -130,81 +145,96 @@ export default function StepProposal({
     [orders, currentScheme, behavior]
   );
 
-  // The rec options: evaluated once per rec change, not on every Custom keystroke.
-  // Task-3 mechanical bridge: each rec now carries a full multi-tier scheme; this
-  // summarises its first changed tier (or the dominant tier when nothing changed).
-  // Task 4 rewires the report to render every changed tier properly.
+  // The rec options: each rec carries its full multi-tier scheme; the report renders
+  // every changed tier directly. Per-option SchemeEvaluation re-runs the same params
+  // the sweep used (net-profit: uplift off; basket-builder: uplift on, window already
+  // the typical unit price when line items exist), so it reproduces the rec's deltas.
   const recReportOptions = useMemo<ReportOption[]>(() => {
     if (!behavior || !recs) return [];
     const result: ReportOption[] = [];
     for (const rec of recs) {
-      const tier = rec.changedTiers[0] ?? dominantTier ?? "standard";
-      const tierConfig = rec.scheme[tier];
-      if (!tierConfig) continue;
-      // Net-profit forces uplift off (matching recommendOptions); basket-builder uses
-      // the full behaviour params — with unitStats null both reproduce the rec's
-      // deltas exactly.
-      const params =
-        rec.id === "basket-builder" ? behavior : { ...behavior, upliftRate: 0 };
-      const evaluation = evaluateScheme(orders, currentScheme, rec.scheme, params);
+      const evaluation = evaluateScheme(
+        orders,
+        currentScheme,
+        rec.scheme,
+        paramsForOption(rec.id, behavior)
+      );
       if (evaluation) {
         result.push({
           key: rec.id,
           label: rec.label,
           shortLabel: OPTION_SHORT_LABELS[rec.id],
           color: OPTION_COLORS[rec.id],
-          schemeSummary: describeStandard(rec.scheme[tier]),
-          tier,
-          threshold: tierConfig.freeThreshold,
+          scheme: rec.scheme,
+          changedTiers: rec.changedTiers,
           evaluation,
           unconstrained: rec.unconstrained,
           capPinned: rec.capPinned,
           matchesCurrent: rec.changedTiers.length === 0,
+          ...(rec.basketNarrative !== undefined ? { basketNarrative: rec.basketNarrative } : {}),
         });
       }
     }
     return result;
-  }, [behavior, recs, orders, currentScheme, dominantTier]);
+  }, [behavior, recs, orders, currentScheme]);
 
-  // Custom = Current per used tier (fee + free threshold)? Then it adds no information
-  // and stays out of the verdict ranking.
-  const customIsCurrent = useMemo(
-    () =>
-      usedTiers.every((tier) => {
-        const current = currentScheme[tier];
-        const proposed = proposedScheme[tier];
-        if (!current || !proposed) return current === proposed;
-        return current.fee === proposed.fee && current.freeThreshold === proposed.freeThreshold;
-      }),
-    [usedTiers, currentScheme, proposedScheme]
+  // Competitor benchmark = Current per tier? Then it adds no information and stays
+  // out of the verdict ranking. Based on the deferred scheme its evaluation used.
+  const customChangedTiers = useMemo(
+    () => changedTiersOf(currentScheme, deferredProposedScheme),
+    [currentScheme, deferredProposedScheme]
   );
+  const customIsCurrent = customChangedTiers.length === 0;
 
-  // Merge rec options with the Custom option. Custom reads from deferredProposedScheme
-  // so it only recomputes after the keystroke render has settled. Custom's tier is the
-  // dominant tier for labelling only — its scheme carries every tier's configuration.
+  // Merge rec options with the Competitor benchmark, which reads from
+  // deferredProposedScheme so it only recomputes after the keystroke render settles.
   const reportOptions = useMemo<ReportOption[]>(() => {
-    const customTier = dominantTier ?? "standard";
     const customOption: ReportOption[] = customEval
       ? [
           {
             key: "custom",
-            label: "Custom",
+            label: "Competitor benchmark",
             shortLabel: OPTION_SHORT_LABELS.custom,
             color: OPTION_COLORS.custom,
-            schemeSummary: describeStandard(deferredProposedScheme[customTier]),
-            tier: customTier,
-            threshold: deferredProposedScheme[customTier]?.freeThreshold ?? null,
+            scheme: deferredProposedScheme,
+            changedTiers: customChangedTiers,
             evaluation: customEval,
             matchesCurrent: customIsCurrent,
           },
         ]
       : [];
     return [...recReportOptions, ...customOption];
-  }, [recReportOptions, customEval, deferredProposedScheme, dominantTier, customIsCurrent]);
+  }, [recReportOptions, customEval, deferredProposedScheme, customChangedTiers, customIsCurrent]);
+
+  // Buying-behaviour segments vs the current scheme, and where each option moves them.
+  // Bounded: |options| × |segments| scenario runs over pre-bucketed subsets.
+  const segments = useMemo(
+    () => segmentOrders(orders, currentScheme, effectiveWindow),
+    [orders, currentScheme, effectiveWindow]
+  );
+
+  const outcomesByOption = useMemo<Record<string, SegmentOutcome[]>>(() => {
+    if (!behavior) return {};
+    return Object.fromEntries(
+      reportOptions.map((option) => [
+        option.key,
+        segmentOutcomes(
+          orders,
+          currentScheme,
+          option.scheme,
+          paramsForOption(option.key, behavior),
+          effectiveWindow
+        ),
+      ])
+    );
+  }, [behavior, reportOptions, orders, currentScheme, effectiveWindow]);
 
   // Single source for the printed assumptions line — built from the deferred values the
   // metrics were actually computed from, so caption and numbers stay consistent mid-drag.
-  const assumptionEcho = `Assumptions: ${Math.round(deferredUplift * 100)}% of orders within $${deferredWindow} below the threshold build baskets (Basket-builder only); ${Math.round(deferredAbandon * 100)}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${Math.round((deferredCogs ?? 0) * 100)}%. Deltas are expected values vs the observed current baseline over ${currentFacts?.orderCount ?? 0} orders.`;
+  const windowClause = unitStats
+    ? `window auto-set to one unit (~$${Math.round(unitStats.typicalUnitPrice)}) for Basket-builder from your line items`
+    : `within $${deferredWindow} below the threshold`;
+  const assumptionEcho = `Assumptions: ${Math.round(deferredUplift * 100)}% of orders just below a new threshold build baskets (${windowClause}); ${Math.round(deferredAbandon * 100)}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${Math.round((deferredCogs ?? 0) * 100)}%. Deltas are expected values vs the observed current baseline over ${currentFacts?.orderCount ?? 0} orders.`;
 
   return (
     <div className="space-y-8">
@@ -212,13 +242,12 @@ export default function StepProposal({
         options={reportOptions}
         currentFacts={currentFacts}
         currentScheme={currentScheme}
-        customScheme={deferredProposedScheme}
-        dominantTier={dominantTier}
         recsEmpty={recs !== null && recs.length === 0}
         cogsPercent={cogsPercent}
         monthlyOrders={monthlyOrders}
         upliftRate={upliftRate}
         upliftWindow={upliftWindow}
+        autoWindow={unitStats ? unitStats.typicalUnitPrice : null}
         abandonRate={abandonRate}
         assumptionEcho={assumptionEcho}
         onCogsChange={onCogsChange}
@@ -229,8 +258,9 @@ export default function StepProposal({
 
       <div className="no-print">
         <p className="text-tac-muted mb-4">
-          Custom scheme — adjust the fee and free-over threshold per service. It appears as the
-          Custom column above and as the Custom option throughout the report below.
+          Competitor benchmark — enter a competitor&apos;s shipping scheme to compare
+          like-for-like. It appears as the Competitor benchmark column above and as the
+          Competitor option throughout the report below.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {usedTiers.map((t) => (
@@ -283,6 +313,9 @@ export default function StepProposal({
           reconciliation={reconciliation}
           curves={curves}
           grossValues={grossValues}
+          segments={segments}
+          outcomesByOption={outcomesByOption}
+          segmentWindow={effectiveWindow}
           monthlyOrders={monthlyOrders}
           assumptionEcho={assumptionEcho}
           customIsCurrent={customIsCurrent}

@@ -2,11 +2,11 @@
 
 import { SchemeEvaluation } from "@/lib/shipping-sim/types";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/calculations";
-import { signedCurrency } from "../analysis/format";
+import { describeChangedTiers, freightShiftSentence, signedCurrency } from "../analysis/format";
 import { ReportOption } from "./types";
 
 interface VerdictCardProps {
-  rankedOptions: ReportOption[]; // ranked by contributionDelta desc, Custom already excluded when = Current
+  rankedOptions: ReportOption[]; // ranked by contributionDelta desc, Competitor already excluded when = Current
   currentFacts: SchemeEvaluation;
   monthlyOrders: number | undefined;
 }
@@ -37,8 +37,8 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
         {HEADER}
         <p className="text-sm text-tac-muted">
           No option differs from the current scheme yet — recommendations need uploaded orders
-          that map to a service in the current scheme; adjust the Custom scheme to compare it
-          here.
+          that map to a service in the current scheme; adjust the Competitor benchmark scheme
+          to compare it here.
         </p>
       </div>
     );
@@ -58,8 +58,8 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
           No modelled option beats the current scheme under these assumptions — the best candidate (
           <strong className="text-tac-accent">{winner.label}</strong>) still shows{" "}
           <strong>{signedCurrency(delta)}</strong> expected total contribution. Keeping the current
-          scheme is the defensible default; revisit after adjusting the assumptions or the Custom
-          scheme.
+          scheme is the defensible default; revisit after adjusting the assumptions or the
+          Competitor benchmark scheme.
         </p>
         {winner.unconstrained && (
           <p className="text-sm text-tac-warning mt-2">
@@ -71,11 +71,15 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
     );
   }
 
+  const freightShift =
+    winner.key === "net-profit" ? freightShiftSentence(w, currentFacts) : null;
+
   return (
     <div className="card border-l-2 border-l-tac-accent">
       {HEADER}
       <p className="text-sm mb-2">
-        <strong className="text-tac-accent">{winner.label}</strong> ({winner.schemeSummary}) leads
+        <strong className="text-tac-accent">{winner.label}</strong> (
+        {describeChangedTiers(winner.scheme, winner.changedTiers)}) leads
         with <strong>{signedCurrency(delta)}</strong> expected total contribution vs
         current across {w.orderCount} orders
         {monthlyOrders !== undefined && w.orderCount > 0 && (
@@ -86,6 +90,7 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
         )}
         .
       </p>
+      {freightShift && <p className="text-sm text-tac-muted mb-2">{freightShift}</p>}
       <p className="text-sm text-tac-muted mb-2">
         Its expected cost: {w.expectedOrdersLost.toFixed(1)} orders lost to abandonment, with the
         free-order share moving {freeShiftFrom} → {freeShiftTo}.

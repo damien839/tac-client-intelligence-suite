@@ -1,4 +1,4 @@
-import { CanonicalTier, RecommendationId, SchemeEvaluation } from "@/lib/shipping-sim/types";
+import { CanonicalTier, RecommendationId, Scheme, SchemeEvaluation } from "@/lib/shipping-sim/types";
 
 export type OptionKey = RecommendationId | "custom";
 
@@ -8,21 +8,23 @@ export interface ReportOption {
   label: string;
   shortLabel: string;
   color: string;
-  schemeSummary: string;
-  /** The tier this option re-prices — schemeSummary/threshold/fee refer to this tier. */
-  tier: CanonicalTier;
-  threshold: number | null; // free-over line for `tier` (null = flat / no free shipping)
+  /** The option's full candidate scheme — may change multiple tiers. */
+  scheme: Scheme;
+  /** Tiers whose fee or free threshold differ from the current scheme. */
+  changedTiers: CanonicalTier[];
   evaluation: SchemeEvaluation;
   unconstrained?: boolean;
   capPinned?: boolean;
-  /** This option's best answer equals the current scheme's config for its tier. */
+  /** This option's best answer equals the current scheme (changedTiers is empty). */
   matchesCurrent?: boolean;
+  /** Basket-builder only: plain-English line naming the source cluster + typical unit. */
+  basketNarrative?: string;
 }
 
 export const OPTION_SHORT_LABELS: Record<OptionKey, string> = {
   "net-profit": "Net profit",
   "basket-builder": "Basket",
-  custom: "Custom",
+  custom: "Competitor",
 };
 
 export const OPTION_COLORS: Record<OptionKey, string> = {

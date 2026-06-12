@@ -6,6 +6,8 @@ import {
   Reconciliation,
   Scheme,
   SchemeEvaluation,
+  Segment,
+  SegmentOutcome,
   ThresholdCurvePoint,
   TIER_LABELS,
 } from "@/lib/shipping-sim/types";
@@ -15,6 +17,7 @@ import { NEUTRAL_COLOR, ReportOption } from "./report/types";
 import VerdictCard from "./report/VerdictCard";
 import ContributionDecomposition from "./report/ContributionDecomposition";
 import RecoveryFreeShareChart from "./report/RecoveryFreeShareChart";
+import SegmentMigration from "./report/SegmentMigration";
 import OrderImpactTable from "./report/OrderImpactTable";
 import TierMixChart from "./report/TierMixChart";
 import ThresholdSensitivityChart from "./report/ThresholdSensitivityChart";
@@ -24,14 +27,20 @@ interface ComparisonReportProps {
   options: ReportOption[];
   currentFacts: SchemeEvaluation;
   currentScheme: Scheme;
-  /** The tier the recommendations re-price — drives the "Now" markers and chart labels. */
+  /** The tier carrying most paid volume — drives the sensitivity sweep and "Now" markers. */
   dominantTier: CanonicalTier | null;
   reconciliation: Reconciliation;
   curves: ThresholdCurvePoint[];
   grossValues: number[];
+  /** Buying-behaviour segments of the order book vs the current scheme. */
+  segments: Segment[];
+  /** Per-option segment outcomes, keyed by option key. */
+  outcomesByOption: Record<string, SegmentOutcome[]>;
+  /** The unit window the segments were built with (typical unit price or slider). */
+  segmentWindow: number;
   monthlyOrders: number | undefined;
   assumptionEcho: string;
-  /** Custom scheme is identical to Current — keep it in charts/tables but out of the verdict ranking. */
+  /** Competitor scheme is identical to Current — keep it in charts/tables but out of the verdict ranking. */
   customIsCurrent: boolean;
 }
 
@@ -54,11 +63,14 @@ export default function ComparisonReport({
   reconciliation,
   curves,
   grossValues,
+  segments,
+  outcomesByOption,
+  segmentWindow,
   monthlyOrders,
   assumptionEcho,
   customIsCurrent,
 }: ComparisonReportProps) {
-  // Verdict ranking: highest Δ total contribution first; a Custom scheme that
+  // Verdict ranking: highest Δ total contribution first; a Competitor benchmark that
   // merely restates Current carries no information, so it stays out of the narrative.
   const rankedOptions = useMemo(
     () =>
@@ -74,18 +86,35 @@ export default function ComparisonReport({
     : null;
   const tierLabel = TIER_LABELS[dominantTier ?? "standard"];
 
+  // AOV markers: one per numeric free-over line an option CHANGES (deduped within
+  // each option — two tiers landing on the same threshold need only one mark).
   const markers: ThresholdMarker[] = [
     ...(currentThreshold !== null
       ? [{ value: currentThreshold, label: "Now", color: NEUTRAL_COLOR }]
       : []),
-    ...options
-      .filter((option) => option.threshold !== null)
-      .map((option) => ({
-        value: option.threshold!,
+    ...options.flatMap((option) => {
+      const thresholds = option.changedTiers
+        .map((tier) => option.scheme[tier]?.freeThreshold)
+        .filter((value): value is number => value !== null && value !== undefined);
+      return Array.from(new Set(thresholds)).map((value) => ({
+        value,
         label: option.shortLabel,
         color: option.color,
-      })),
+      }));
+    }),
   ];
+
+  // Sensitivity-chart markers: only options that actually move the swept (dominant)
+  // tier's free-over line to a numeric value get a reference line.
+  const sensitivityMarkers: ThresholdMarker[] =
+    dominantTier === null
+      ? []
+      : options.flatMap((option) => {
+          if (!option.changedTiers.includes(dominantTier)) return [];
+          const threshold = option.scheme[dominantTier]?.freeThreshold;
+          if (threshold === null || threshold === undefined) return [];
+          return [{ value: threshold, label: option.shortLabel, color: option.color }];
+        });
 
   const reportDate = new Date().toLocaleDateString("en-AU", {
     day: "numeric",
@@ -121,6 +150,13 @@ export default function ComparisonReport({
 
       <RecoveryFreeShareChart options={options} currentFacts={currentFacts} />
 
+      <SegmentMigration
+        segments={segments}
+        options={options}
+        outcomesByOption={outcomesByOption}
+        unitWindow={segmentWindow}
+      />
+
       <OrderImpactTable options={options} />
 
       <TierMixChart options={options} currentFacts={currentFacts} />
@@ -131,7 +167,7 @@ export default function ComparisonReport({
         <ThresholdSensitivityChart
           curves={curves}
           currentThreshold={currentThreshold}
-          options={options}
+          markers={sensitivityMarkers}
           tierLabel={tierLabel}
         />
       )}

@@ -13,12 +13,14 @@ import {
 } from "recharts";
 import { ThresholdCurvePoint } from "@/lib/shipping-sim/types";
 import { formatCurrency } from "@/lib/calculations";
-import { AXIS_TICK, GRID_STROKE, NEUTRAL_COLOR, ReportOption, TOOLTIP_STYLE } from "./types";
+import { ThresholdMarker } from "../analysis/AovDistribution";
+import { AXIS_TICK, GRID_STROKE, NEUTRAL_COLOR, TOOLTIP_STYLE } from "./types";
 
 interface ThresholdSensitivityChartProps {
   curves: ThresholdCurvePoint[];
   currentThreshold: number | null;
-  options: ReportOption[];
+  /** Reference lines for options that move THIS tier's free-over line. */
+  markers: ThresholdMarker[];
   /** Display label of the swept tier (e.g. "Standard", "Express"). */
   tierLabel: string;
 }
@@ -26,7 +28,7 @@ interface ThresholdSensitivityChartProps {
 export default function ThresholdSensitivityChart({
   curves,
   currentThreshold,
-  options,
+  markers,
   tierLabel,
 }: ThresholdSensitivityChartProps) {
   return (
@@ -37,7 +39,9 @@ export default function ThresholdSensitivityChart({
       <p className="text-sm text-tac-muted mb-4">
         How the outcome changes as the {tierLabel} free-over threshold moves (fee held at
         current). The gap between the lines is the basket-building effect; steep regions are
-        where the threshold decision matters.
+        where the threshold decision matters. This isolates one lever — the Net profit
+        maximiser may move several at once (fees and the other service&apos;s line), which this
+        curve can&apos;t show.
       </p>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={curves} margin={{ top: 16, right: 16, bottom: 4, left: 8 }}>
@@ -64,22 +68,20 @@ export default function ThresholdSensitivityChart({
               label={{ value: "now", fontSize: 10, fill: NEUTRAL_COLOR, position: "top" }}
             />
           )}
-          {options
-            .filter((option) => option.threshold !== null)
-            .map((option) => (
-              <ReferenceLine
-                key={option.key}
-                x={option.threshold!}
-                stroke={option.color}
-                strokeDasharray="3 3"
-                label={{
-                  value: option.shortLabel,
-                  fontSize: 10,
-                  fill: option.color,
-                  position: "top",
-                }}
-              />
-            ))}
+          {markers.map((marker) => (
+            <ReferenceLine
+              key={`${marker.label}-${marker.value}`}
+              x={marker.value}
+              stroke={marker.color}
+              strokeDasharray="3 3"
+              label={{
+                value: marker.label,
+                fontSize: 10,
+                fill: marker.color,
+                position: "top",
+              }}
+            />
+          ))}
           <ReferenceLine y={0} stroke={GRID_STROKE} />
           <Line
             type="monotone"

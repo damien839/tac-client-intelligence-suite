@@ -22,11 +22,11 @@ function renderCount(value: number): string {
 export default function OrderImpactTable({ options }: OrderImpactTableProps) {
   return (
     <div className="card overflow-x-auto">
-      <h3 className="text-lg font-semibold mb-1 text-tac-accent">How each option moves orders</h3>
+      <h3 className="text-lg font-semibold mb-1 text-tac-accent">Order-impact totals</h3>
       <p className="text-sm text-tac-muted mb-4">
-        What customers do differently under each option, in expected order counts: who starts
-        paying for shipping, who ships free, who adds items to qualify, who switches service, who
-        walks away.
+        The segment movements above, summed across the whole order book: who starts paying for
+        shipping, who ships free, who adds items to qualify, who switches service, who walks
+        away.
       </p>
       <table className="w-full text-sm">
         <thead>

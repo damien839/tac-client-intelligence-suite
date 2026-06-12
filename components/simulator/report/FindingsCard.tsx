@@ -2,7 +2,7 @@
 
 import { SchemeEvaluation } from "@/lib/shipping-sim/types";
 import { formatCurrency, formatNumber } from "@/lib/calculations";
-import { signedCurrency } from "../analysis/format";
+import { describeChangedTiers, freightShiftSentence, signedCurrency } from "../analysis/format";
 import { ReportOption } from "./types";
 
 interface FindingsCardProps {
@@ -40,9 +40,20 @@ export default function FindingsCard({
   if (winner) {
     const w = winner.evaluation;
     findings.push(
-      `${winner.label} (${winner.schemeSummary}) ranks first: ${signedCurrency(w.contributionDelta)} expected total contribution vs current across ${w.orderCount} orders.`
+      `${winner.label} (${describeChangedTiers(winner.scheme, winner.changedTiers)}) ranks first: ${signedCurrency(w.contributionDelta)} expected total contribution vs current across ${w.orderCount} orders.`
     );
     findings.push(moneySource(w, currentFacts));
+    const netProfitOption = rankedOptions.find((option) => option.key === "net-profit");
+    if (netProfitOption) {
+      const shift = freightShiftSentence(netProfitOption.evaluation, currentFacts);
+      if (shift) {
+        findings.push(`Freight shift (${netProfitOption.label}): ${shift}`);
+      }
+    }
+    const basketOption = rankedOptions.find((option) => option.basketNarrative !== undefined);
+    if (basketOption?.basketNarrative) {
+      findings.push(`${basketOption.label}: ${basketOption.basketNarrative}`);
+    }
     const newlyPayingClause =
       w.impact.newlyPaying >= 0.05
         ? `, and ${w.impact.newlyPaying.toFixed(1)} orders that ship free today would start paying shipping`
@@ -63,7 +74,7 @@ export default function FindingsCard({
     }
   } else {
     findings.push(
-      "No option differs from the current scheme yet — recommendations need uploaded orders that map to a service in the current scheme; adjust the Custom scheme to compare one here."
+      "No option differs from the current scheme yet — recommendations need uploaded orders that map to a service in the current scheme; adjust the Competitor benchmark scheme to compare one here."
     );
   }
 

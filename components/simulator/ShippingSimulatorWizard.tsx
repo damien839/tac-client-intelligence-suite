@@ -9,6 +9,7 @@ import {
   Scheme,
   TaggedOrder,
   TierConfig,
+  UnitStats,
 } from "@/lib/shipping-sim/types";
 import StepUpload from "./steps/StepUpload";
 import StepMapServices from "./steps/StepMapServices";
@@ -27,6 +28,7 @@ export default function ShippingSimulatorWizard() {
   const [services, setServices] = useState<string[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
+  const [unitStats, setUnitStats] = useState<UnitStats | null>(null);
 
   // Step 2
   const [serviceMap, setServiceMap] = useState<ServiceMap>({});
@@ -44,6 +46,7 @@ export default function ShippingSimulatorWizard() {
     setServices(r.services);
     setParseErrors(r.errors);
     setParseWarnings(r.warnings);
+    setUnitStats(r.unitStats); // resets to null on summary-mode re-uploads
   }
 
   // Tiers actually used (mapped to a canonical tier, not excluded)
@@ -162,6 +165,7 @@ export default function ShippingSimulatorWizard() {
             orders={orders}
             errors={parseErrors}
             warnings={parseWarnings}
+            unitStatsDetected={unitStats !== null}
             onUpload={handleUpload}
           />
         )}
@@ -190,6 +194,7 @@ export default function ShippingSimulatorWizard() {
           <StepProposal
             orders={taggedOrders}
             usedTiers={usedTiers}
+            unitStats={unitStats}
             tierVals={proposedTiers}
             cogsPercent={cogsPercent}
             monthlyOrders={monthlyOrders}

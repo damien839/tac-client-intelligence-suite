@@ -13,19 +13,18 @@ import { describeStandard, signedCurrency } from "./analysis/format";
 import { ReportOption } from "./report/types";
 
 interface OptionsComparisonProps {
-  /** The evaluated options (recommendations + Custom) — same data that drives the report below. */
+  /** The evaluated options (recommendations + Competitor benchmark) — same data that drives the report below. */
   options: ReportOption[];
   currentFacts: SchemeEvaluation | null; // current scheme vs itself, behaviour zeroed
   currentScheme: Scheme;
-  customScheme: Scheme;
-  /** The tier the recommendations re-price — the one carrying most paid shipping volume. */
-  dominantTier: CanonicalTier | null;
   /** True when recommendations were computed but came back empty (no analysable paid tier). */
   recsEmpty: boolean;
   cogsPercent: number | undefined;
   monthlyOrders: number | undefined;
   upliftRate: number;
   upliftWindow: number;
+  /** Typical unit price when line-item data exists — replaces the uplift-window slider. */
+  autoWindow: number | null;
   abandonRate: number;
   /** Printed assumptions line — built by the parent from the deferred values the table metrics were actually computed from, and shared with the report below. */
   assumptionEcho: string;
@@ -70,13 +69,12 @@ export default function OptionsComparison({
   options,
   currentFacts,
   currentScheme,
-  customScheme,
-  dominantTier,
   recsEmpty,
   cogsPercent,
   monthlyOrders,
   upliftRate,
   upliftWindow,
+  autoWindow,
   abandonRate,
   assumptionEcho,
   onCogsChange,
@@ -103,7 +101,9 @@ export default function OptionsComparison({
   ];
 
   const usedTiers: CanonicalTier[] = CANONICAL_TIERS.filter(
-    (tier) => currentScheme[tier] !== undefined || customScheme[tier] !== undefined
+    (tier) =>
+      currentScheme[tier] !== undefined ||
+      options.some((option) => option.scheme[tier] !== undefined)
   );
 
   const orderCount = currentFacts?.orderCount ?? 0;
@@ -111,15 +111,17 @@ export default function OptionsComparison({
   const anyCapPinned = options.some((option) => option.capPinned && !option.unconstrained);
 
   /**
-   * Per-tier scheme summary for a column. Recommendations only re-price their own
-   * tier (the dominant paid tier) — every other tier stays at current pricing for
-   * them; only Custom carries its own per-tier configuration.
+   * Per-tier scheme summary for a column — every option carries its full multi-tier
+   * scheme, so multi-tier changes (e.g. the net-profit sweep moving both standard and
+   * express) render naturally. Changed cells are highlighted via `changedTiers`.
    */
   function schemeCell(col: Column, tier: CanonicalTier): string {
-    if (col.isBaseline) return describeStandard(currentScheme[tier]);
-    if (col.option?.key === "custom") return describeStandard(customScheme[tier]);
-    if (tier === col.option?.tier) return col.option.schemeSummary;
-    return describeStandard(currentScheme[tier]);
+    if (col.isBaseline || !col.option) return describeStandard(currentScheme[tier]);
+    return describeStandard(col.option.scheme[tier]);
+  }
+
+  function schemeCellChanged(col: Column, tier: CanonicalTier): boolean {
+    return !col.isBaseline && (col.option?.changedTiers.includes(tier) ?? false);
   }
 
   const volumeRows: BodyRow[] = usedTiers.map((tier) => ({
@@ -248,15 +250,35 @@ export default function OptionsComparison({
             max={100}
             tooltip="Share of orders just below a NEW free-shipping threshold that add items to qualify. Orders already near the current threshold have shown they don't build, so they're excluded."
           />
-          <InputField
-            label="Uplift window"
-            value={upliftWindow}
-            onChange={onUpliftWindowChange}
-            prefix="$"
-            step={5}
-            min={0}
-            tooltip="How far below the threshold an order can be and still build to it"
-          />
+          {autoWindow !== null ? (
+            <div>
+              <label
+                className="label-text"
+                title="Set automatically from your uploaded line items — the quantity-weighted median unit price. One more typical unit closes this gap."
+              >
+                Uplift window
+                <span
+                  className="ml-1 text-tac-accent cursor-help"
+                  title="Set automatically from your uploaded line items — the quantity-weighted median unit price. One more typical unit closes this gap."
+                >
+                  ⓘ
+                </span>
+              </label>
+              <p className="text-sm text-tac-text py-2">
+                ~${Math.round(autoWindow)} (auto from your line items)
+              </p>
+            </div>
+          ) : (
+            <InputField
+              label="Uplift window"
+              value={upliftWindow}
+              onChange={onUpliftWindowChange}
+              prefix="$"
+              step={5}
+              min={0}
+              tooltip="How far below the threshold an order can be and still build to it"
+            />
+          )}
           <InputField
             label="Abandonment / $10"
             value={toPercent(abandonRate)}
@@ -282,16 +304,13 @@ export default function OptionsComparison({
           <div className="card overflow-x-auto">
             <p className="text-sm text-tac-muted mb-3">
               Each column is a pricing option; each row is a consequence. Current is what your
-              uploaded orders actually did. The three recommendations come from testing
-              thousands of threshold-and-fee combinations against your orders; Custom is the
-              scheme entered below the table. Read across a row to compare options.
-              {dominantTier && (
-                <>
-                  {" "}The three recommendations re-price your {TIER_LABELS[dominantTier]}{" "}
-                  service — the service carrying most of your shipping volume; other services
-                  stay at current pricing.
-                </>
-              )}
+              uploaded orders actually did. The two recommendations come from testing thousands
+              of threshold-and-fee combinations against your orders: the Net profit maximiser
+              re-prices your services together — including shifting volume to the cheaper
+              service; the Basket-builder places free-shipping lines where one extra unit gets
+              the customer there. Competitor benchmark is the scheme entered below the table.
+              Read across a row to compare options; highlighted scheme cells show what each
+              option changes.
             </p>
             <table className="w-full text-sm">
               <thead>
@@ -299,7 +318,14 @@ export default function OptionsComparison({
                   <th className="text-left py-2 pr-3 font-normal">Metric</th>
                   {columns.map((col) => (
                     <th key={col.key} className="text-right py-2 px-3">
-                      <span className={col.isBaseline ? "text-tac-muted" : "text-tac-accent"}>
+                      <span
+                        className={col.isBaseline ? "text-tac-muted" : "text-tac-accent"}
+                        title={
+                          col.option?.key === "custom"
+                            ? "Competitor benchmark assumes your product pricing (RRP) is comparable — if their RRP differs, the comparison is not like-for-like."
+                            : undefined
+                        }
+                      >
                         {col.label}
                         {col.unconstrained && <span title="Optimum may be unreliable at 0% abandonment">*</span>}
                         {col.capPinned && !col.unconstrained && (
@@ -321,7 +347,14 @@ export default function OptionsComparison({
                   <tr key={tier} className="border-b border-tac-border/50 text-xs text-tac-muted">
                     <td className="py-1 pr-3">{TIER_LABELS[tier]} scheme</td>
                     {columns.map((col) => (
-                      <td key={col.key} className="text-right py-1 px-3">{schemeCell(col, tier)}</td>
+                      <td
+                        key={col.key}
+                        className={`text-right py-1 px-3 ${
+                          schemeCellChanged(col, tier) ? "text-tac-accent font-medium" : ""
+                        }`}
+                      >
+                        {schemeCell(col, tier)}
+                      </td>
                     ))}
                   </tr>
                 ))}
@@ -348,6 +381,10 @@ export default function OptionsComparison({
               </tbody>
             </table>
             <p className="text-xs text-tac-muted mt-3">{assumptionEcho}</p>
+            <p className="text-xs text-tac-muted mt-1">
+              Competitor benchmark assumes your product pricing (RRP) is comparable — if their
+              RRP differs, the comparison is not like-for-like.
+            </p>
             {anyUnconstrained && (
               <p className="text-xs text-tac-warning mt-1">
                 * Abandonment is 0% — nothing stops &quot;charge everyone more&quot;, so this
