@@ -1,4 +1,4 @@
-import { behavioralScenario, bucketOrders, prepareBuckets } from "./recommend";
+import { behavioralScenario, bucketOrders, prepareBuckets } from "./scenario";
 import {
   BehaviorParams,
   ItemBand,
