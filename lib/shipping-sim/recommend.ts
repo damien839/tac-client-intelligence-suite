@@ -181,7 +181,8 @@ interface NetProfitCandidate {
  * evaluations; the theoretical worst (threshold cap $1000, both fees high, 8 unit
  * candidates) is far larger, so above COARSE_DOUBLE_BUCKETS prepared buckets the
  * coarse steps double ($40/$4), quartering the numeric grid. The refine pass adds
- * at most 5 x 5 x 5 = 125 evaluations.
+ * at most 5 x 5 x 5 = 125 evaluations at base steps (9 per lever -> up to 729 when
+ * the coarse steps are doubled for large bucket counts).
  */
 function sweepNetProfitMultiTier(
   ctx: SweepContext,
@@ -223,7 +224,9 @@ function sweepNetProfitMultiTier(
     }
   };
 
-  // Coarse pass. Ascending loops + strict > keep the earliest (lowest-lever) of ties.
+  // Coarse pass. Strict > keeps the first of tied candidates: lowest value for the
+  // ascending numeric levers; for the discrete express-threshold lever the order is
+  // current -> null -> candidates, so ties prefer keeping the current express line.
   for (const expT of expThresholds) {
     for (const expFee of expFees) {
       for (const stdT of stdThresholds) {
@@ -378,20 +381,20 @@ function sweepBasketUnitDriven(
     }
   }
 
-  // Best-per-tier combination: each profitably-changed tier's winning threshold at
-  // once (a tier whose best single change loses money can never improve the combo).
-  const profitableTiers = usedTiers.filter(
-    (tier) => (perTier.get(tier)?.contributionDelta ?? 0) > 0
-  );
-  if (profitableTiers.length >= 2) {
-    const scheme = profitableTiers.reduce<Scheme>(
+  // Best-per-tier combination, evaluated UNCONDITIONALLY when two or more tiers have
+  // candidates: tier-switching makes the levers interact (moving one tier's free line
+  // changes which tier is every order's cheapest alternative), so a tier whose best
+  // single change loses money can still improve the combination.
+  const comboTiers = usedTiers.filter((tier) => perTier.has(tier));
+  if (comboTiers.length >= 2) {
+    const scheme = comboTiers.reduce<Scheme>(
       (acc, tier) => ({ ...acc, [tier]: { ...current[tier]!, freeThreshold: perTier.get(tier)!.threshold } }),
       { ...current }
     );
     const { result, contributionDelta } = contributionOf(ctx, scheme, params);
     if (best && contributionDelta > best.contributionDelta) {
       // Narrative anchors on the tier whose single change contributed most.
-      const primary = profitableTiers.reduce((a, b) =>
+      const primary = comboTiers.reduce((a, b) =>
         perTier.get(b)!.contributionDelta > perTier.get(a)!.contributionDelta ? b : a
       );
       best = { scheme, result, contributionDelta, threshold: perTier.get(primary)!.threshold };
