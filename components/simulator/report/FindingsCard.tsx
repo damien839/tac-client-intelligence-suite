@@ -2,7 +2,12 @@
 
 import { SchemeEvaluation } from "@/lib/shipping-sim/types";
 import { formatCurrency, formatNumber } from "@/lib/calculations";
-import { describeChangedTiers, freightShiftSentence, signedCurrency } from "../analysis/format";
+import {
+  describeChangedTiers,
+  freightShiftSentence,
+  recoveryMoveSentence,
+  signedCurrency,
+} from "../analysis/format";
 import { ReportOption } from "./types";
 
 interface FindingsCardProps {
@@ -48,6 +53,12 @@ export default function FindingsCard({
       const shift = freightShiftSentence(netProfitOption.evaluation, currentFacts);
       if (shift) {
         findings.push(`Freight shift (${netProfitOption.label}): ${shift}`);
+      }
+      // The option's objective is a neutral shipping P&L — state the recovery move
+      // alongside the contribution figures whenever it gets closer to 100%.
+      const recoveryMove = recoveryMoveSentence(netProfitOption.evaluation, currentFacts);
+      if (recoveryMove) {
+        findings.push(`Cost recovery (${netProfitOption.label}): ${recoveryMove}`);
       }
     }
     const basketOption = rankedOptions.find((option) => option.basketNarrative !== undefined);

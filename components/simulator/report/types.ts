@@ -22,7 +22,7 @@ export interface ReportOption {
 }
 
 export const OPTION_SHORT_LABELS: Record<OptionKey, string> = {
-  "net-profit": "Net profit",
+  "net-profit": "Cost recovery",
   "basket-builder": "Basket",
   custom: "Competitor",
 };

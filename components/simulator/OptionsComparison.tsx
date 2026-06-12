@@ -305,10 +305,11 @@ export default function OptionsComparison({
             <p className="text-sm text-tac-muted mb-3">
               Each column is a pricing option; each row is a consequence. Current is what your
               uploaded orders actually did. The two recommendations come from testing thousands
-              of threshold-and-fee combinations against your orders: the Net profit maximiser
-              re-prices your services together — including shifting volume to the cheaper
-              service; the Basket-builder places free-shipping lines where one extra unit gets
-              the customer there. Competitor benchmark is the scheme entered below the table.
+              of threshold-and-fee combinations against your orders: the Cost-recovery optimiser
+              re-prices your services together — shifting volume to the cheaper service and
+              setting fees so shipping revenue matches freight cost (net-neutral, no
+              profiteering); the Basket-builder places free-shipping lines where one extra unit
+              gets the customer there. Competitor benchmark is the scheme entered below the table.
               Read across a row to compare options; highlighted scheme cells show what each
               option changes.
             </p>

@@ -233,7 +233,7 @@ export default function StepProposal({
   // metrics were actually computed from, so caption and numbers stay consistent mid-drag.
   // Unit mode: the basket window is auto-set to one typical unit price and applies to the
   // Basket-builder column, the Competitor benchmark column, segments, and the sensitivity
-  // curve; only Net profit maximiser runs with uplift off.
+  // curve; only the Cost-recovery optimiser runs with uplift off.
   const uplift = Math.round(deferredUplift * 100);
   const abandon = Math.round(deferredAbandon * 100);
   const cogs = Math.round((deferredCogs ?? 0) * 100);
@@ -241,7 +241,7 @@ export default function StepProposal({
   const windowPhrase = unitStats
     ? `within one unit (~$${Math.round(unitStats.typicalUnitPrice)}, auto from your line items)`
     : `within $${deferredWindow}`;
-  const assumptionEcho = `Assumptions: ${uplift}% of orders ${windowPhrase} below a new free-shipping threshold build baskets (applies to the Basket-builder and Competitor columns; the Net profit maximiser models price response only); ${abandon}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${cogs}%. Deltas are expected values vs the observed current baseline over ${n} orders.`;
+  const assumptionEcho = `Assumptions: ${uplift}% of orders ${windowPhrase} below a new free-shipping threshold build baskets (applies to the Basket-builder and Competitor columns; the Cost-recovery optimiser models price response only); ${abandon}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${cogs}%. Deltas are expected values vs the observed current baseline over ${n} orders.`;
 
   return (
     <div className="space-y-8">

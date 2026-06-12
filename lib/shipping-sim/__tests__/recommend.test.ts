@@ -280,10 +280,34 @@ describe("recommendOptions", () => {
     abandonRate: 0.1,
   };
 
+  /**
+   * The v4.1 lexicographic cost-recovery comparator, restated from the spec —
+   * duplicated here on purpose so the tests pin the contract, not the implementation.
+   */
+  function neutralDistanceOf(e: { shippingRevenue: number; carrierSpend: number }): number {
+    return Math.abs(e.shippingRevenue - e.carrierSpend);
+  }
+  function isNeutralOf(e: { shippingRevenue: number; carrierSpend: number }): boolean {
+    return neutralDistanceOf(e) <= 0.02 * e.carrierSpend;
+  }
+  function strictlyBetterForCostRecovery(
+    a: { shippingRevenue: number; carrierSpend: number; contributionDelta: number },
+    b: { shippingRevenue: number; carrierSpend: number; contributionDelta: number }
+  ): boolean {
+    const aN = isNeutralOf(a);
+    const bN = isNeutralOf(b);
+    if (aN !== bN) return aN;
+    if (aN) return a.contributionDelta > b.contributionDelta;
+    const dA = neutralDistanceOf(a);
+    const dB = neutralDistanceOf(b);
+    if (dA !== dB) return dA < dB;
+    return a.contributionDelta > b.contributionDelta;
+  }
+
   it("returns exactly [net-profit, basket-builder] with consistent changedTiers", () => {
     const recs = recommendOptions(shiftOrders, shiftCurrent, shiftBehavior, null);
     expect(recs.map((r) => r.id)).toEqual(["net-profit", "basket-builder"]);
-    expect(recs[0].label).toBe("Net profit maximiser");
+    expect(recs[0].label).toBe("Cost-recovery optimiser");
     expect(recs[1].label).toBe("Basket-builder");
     for (const rec of recs) expectChangedTiersConsistent(rec, shiftCurrent);
   });
@@ -292,41 +316,49 @@ describe("recommendOptions", () => {
     expect(recommendOptions([], current, behavior, null)).toEqual([]);
   });
 
-  it("net-profit re-prices express and shifts freight onto standard when that pays", () => {
+  it("cost-recovery closes the subsidy: shifts freight onto standard and lowers fees to neutral", () => {
     const np = recommendOptions(shiftOrders, shiftCurrent, shiftBehavior, null).find(
       (r) => r.id === "net-profit"
     )!;
-    expect(np.changedTiers).toContain("express");
-    // Hand-verified floor: expFee 14 alone moves all 20 express orders to standard
-    // (revealed premium $2 < stay premium $4); each goes from -$18 to +$5 net with no
-    // abandonment (landed fee $10 < current $12) -> +$460. The sweep must do at least
-    // that well (that candidate is on the coarse grid).
-    expect(np.contributionDelta).toBeGreaterThanOrEqual(460 - 1e-9);
-    // Metrics agree with evaluateScheme on the winning scheme (uplift forced off).
-    const ev = evaluateScheme(shiftOrders, shiftCurrent, np.scheme, {
-      ...shiftBehavior,
-      upliftRate: 0,
-    })!;
+    // Derived independently (exhaustive fine-grid search under the spec comparator):
+    // move all 20 express orders onto standard (carrier $30 -> $5) and charge every
+    // order $5: revenue 22 x $5 = $110 = carrier spend -> exactly neutral. Nobody is
+    // worse off ($5 < $10/$12) so nothing abandons; contribution = $0 - (-$350) = +$350.
+    // Express fee $8 is the lowest fee that prices express above every order's
+    // revealed premium ($2): stay premium $8 - $5 = $3 > $2 -> all switch.
+    expect(np.scheme.standard!.fee).toBe(5);
+    expect(np.scheme.standard!.freeThreshold).toBe(90);
+    expect(np.scheme.express!.fee).toBe(8);
+    expect(np.scheme.express!.freeThreshold).toBeNull();
+    expect(np.changedTiers).toEqual(["standard", "express"]);
+    expect(np.contributionDelta).toBeCloseTo(350);
+    expect(np.recoveryRate).toBeCloseTo(1);
+    expect(np.expectedOrdersLost).toBe(0);
+    expect(np.unconstrained).toBe(false);
+    expect(np.capPinned).toBe(false);
+    // Subsidy contract: current recovery < 100%; winner is in the neutral band with
+    // POSITIVE contribution (closing a subsidy makes money).
+    const noUplift = { ...shiftBehavior, upliftRate: 0 };
+    const currentFacts = evaluateScheme(shiftOrders, shiftCurrent, shiftCurrent, noUplift)!;
+    expect(currentFacts.recoveryRate).toBeLessThan(1);
+    expect(np.recoveryRate).toBeGreaterThanOrEqual(0.98);
+    expect(np.recoveryRate).toBeLessThanOrEqual(1.02);
+    expect(np.contributionDelta).toBeGreaterThan(0);
+    // Metrics agree with an independent evaluation; the freight shift is visible.
+    const ev = evaluateScheme(shiftOrders, shiftCurrent, np.scheme, noUplift)!;
     expect(ev.contributionDelta).toBeCloseTo(np.contributionDelta);
     expect(ev.netShippingProfitDelta).toBeCloseTo(np.netShippingProfitDelta);
-    // Freight shift is visible: more volume lands on standard than the current 2 orders.
-    const currentFacts = evaluateScheme(shiftOrders, shiftCurrent, shiftCurrent, {
-      ...shiftBehavior,
-      upliftRate: 0,
-    })!;
-    expect(currentFacts.volumeByTier.standard).toBeCloseTo(2);
-    expect(ev.volumeByTier.standard).toBeGreaterThan(currentFacts.volumeByTier.standard);
+    expect(ev.volumeByTier.standard).toBeCloseTo(22);
+    expect(ev.volumeByTier.express).toBe(0);
   });
 
-  it("net-profit winner beats every sampled coarse candidate (refine-pass sanity)", () => {
+  it("cost-recovery winner is not beaten by any sampled candidate under the lexicographic objective", () => {
     const np = recommendOptions(shiftOrders, shiftCurrent, shiftBehavior, null).find(
       (r) => r.id === "net-profit"
     )!;
     const noUplift = { ...shiftBehavior, upliftRate: 0 };
-    const sample = (
-      std: { fee: number; t: number | null },
-      exp: { fee: number; t: number | null }
-    ): number =>
+    const winner = evaluateScheme(shiftOrders, shiftCurrent, np.scheme, noUplift)!;
+    const sample = (std: { fee: number; t: number | null }, exp: { fee: number; t: number | null }) =>
       evaluateScheme(
         shiftOrders,
         shiftCurrent,
@@ -335,7 +367,7 @@ describe("recommendOptions", () => {
           express: { ...shiftCurrent.express!, fee: exp.fee, freeThreshold: exp.t },
         },
         noUplift
-      )!.contributionDelta;
+      )!;
     const samples = [
       sample({ fee: 10, t: 100 }, { fee: 12, t: null }), // current
       sample({ fee: 10, t: 100 }, { fee: 20, t: null }),
@@ -343,10 +375,19 @@ describe("recommendOptions", () => {
       sample({ fee: 10, t: null }, { fee: 12, t: null }),
       sample({ fee: 20, t: 200 }, { fee: 24, t: null }),
       sample({ fee: 0, t: 0 }, { fee: 0, t: null }),
+      sample({ fee: 14, t: 100 }, { fee: 14, t: null }), // old objective's hand probe
     ];
-    for (const delta of samples) {
-      expect(np.contributionDelta).toBeGreaterThanOrEqual(delta - 1e-9);
+    for (const s of samples) {
+      expect(strictlyBetterForCostRecovery(s, winner)).toBe(false);
     }
+    // The "raise everyone to ~$28" scheme is ALSO neutral (revenue covers the still-
+    // expensive express freight via abandonment-damped fees) but with far lower
+    // contribution — among neutral candidates the higher contribution must win.
+    // This pins the thin-manifold case the coarse grid alone would have missed.
+    const highFeeNeutral = sample({ fee: 28, t: 100 }, { fee: 28, t: null });
+    expect(isNeutralOf(highFeeNeutral)).toBe(true);
+    expect(strictlyBetterForCostRecovery(winner, highFeeNeutral)).toBe(true);
+    expect(strictlyBetterForCostRecovery(highFeeNeutral, winner)).toBe(false);
   });
 
   // Damo-shaped book: std $30 free over $250 (cost $25); express $60 flat (cost $55);
@@ -374,36 +415,43 @@ describe("recommendOptions", () => {
     unitShare: { single: 0.4, double: 0.35, threePlus: 0.25 },
   };
 
-  it("finds the profitable express->standard freight shift on the Damo-shaped book", () => {
+  it("nudges the near-neutral Damo-shaped book into the neutral band (no freight shift pays here)", () => {
     const recs = recommendOptions(damoOrders, damoCurrent, damoBehavior, damoUnits);
     expect(recs.map((r) => r.id)).toEqual(["net-profit", "basket-builder"]);
     const [np, bb] = recs;
-    // Computed optimum (verified independently via evaluateScheme): price express off
-    // the menu (expFee pins at the $120 cap) and capture its volume on standard at a
-    // fee just below the current $60 express fee — switchers are better off (no
-    // abandonment) while per-order margin jumps from $5 to ~$34, net of the free-band
-    // losses the higher standard threshold creates. Both paid tiers change.
-    expect(np.contributionDelta).toBeGreaterThan(0);
-    expect(np.changedTiers).toContain("express");
-    for (const t of np.changedTiers) expect(["standard", "express"]).toContain(t);
-    // The fee cap binds, and the guard says so.
-    expect(np.capPinned).toBe(true);
-    expect(np.unconstrained).toBe(false); // abandonment is live
+    // Derived independently (exhaustive 457k-candidate search under the spec
+    // comparator). This book is already 97.9% recovered (rev $2,790 / spend $2,850,
+    // distance $60 vs band $57 — just outside). Any express re-pricing dumps the
+    // switchers into the standard free band (T $250 sits below most express carts),
+    // destroying $60 fees faster than it cuts $30 of freight, so NO freight shift
+    // reaches the +-2% band. The lexicographic winner raises the standard fee
+    // $30 -> $32: the 3 paying standard orders see a $2 increase (2% abandon each),
+    // rev $2,794.08 / spend $2,848.50 -> distance $54.42 <= band $56.97 (recovery
+    // 98.1%), contribution -$0.30 (= +$5.58 net shipping - $5.88 abandoned margin).
+    expect(np.scheme.standard!.fee).toBe(32);
+    expect(np.scheme.standard!.freeThreshold).toBe(250);
+    expect(np.scheme.express!.fee).toBe(60);
+    expect(np.scheme.express!.freeThreshold).toBeNull();
+    expect(np.changedTiers).toEqual(["standard"]);
+    expect(np.contributionDelta).toBeCloseTo(-0.3);
+    expect(np.recoveryRate).toBeGreaterThanOrEqual(0.98);
+    expect(np.recoveryRate).toBeLessThanOrEqual(1.02);
+    expect(np.unconstrained).toBe(false);
+    // Was pinned at the $120 express-fee cap under the old objective; overshoot is
+    // now penalised, so nothing pins.
+    expect(np.capPinned).toBe(false);
+    // Materiality floor: contribution < $1 BUT the winner is strictly closer to
+    // neutral than the current scheme ($54.42 < $60.00) -> it SURVIVES the floor.
+    expect(np.changedTiers).not.toEqual([]);
     // Metrics agree with an independent evaluation of the winning scheme.
-    const noUpliftCheck = { ...damoBehavior, upliftRate: 0 };
-    const ev = evaluateScheme(damoOrders, damoCurrent, np.scheme, noUpliftCheck)!;
-    expect(ev.contributionDelta).toBeCloseTo(np.contributionDelta);
-    // Freight-shift accounting is visible: express volume moves onto standard.
-    const currentFacts = evaluateScheme(damoOrders, damoCurrent, damoCurrent, noUpliftCheck)!;
-    expect(currentFacts.volumeByTier.standard).toBeCloseTo(15); // 12 free + 3 paying
-    expect(ev.volumeByTier.standard).toBeGreaterThan(currentFacts.volumeByTier.standard);
-    expect(ev.volumeByTier.express).toBeLessThan(currentFacts.volumeByTier.express);
-    // The winner beats hand-picked aggressive candidates.
     const noUplift = { ...damoBehavior, upliftRate: 0 };
-    const probe = (
-      std: { fee: number; t: number | null },
-      exp: { fee: number; t: number | null }
-    ): number =>
+    const ev = evaluateScheme(damoOrders, damoCurrent, np.scheme, noUplift)!;
+    expect(ev.contributionDelta).toBeCloseTo(np.contributionDelta);
+    // No candidate we can hand-construct beats it under the comparator — including
+    // the OLD objective's profiteering optimum (price express off the menu at the
+    // $120 cap, capture volume at $58), which is far from neutral and must lose.
+    const winner = ev;
+    const probe = (std: { fee: number; t: number | null }, exp: { fee: number; t: number | null }) =>
       evaluateScheme(
         damoOrders,
         damoCurrent,
@@ -412,20 +460,23 @@ describe("recommendOptions", () => {
           express: { ...damoCurrent.express!, fee: exp.fee, freeThreshold: exp.t },
         },
         noUplift
-      )!.contributionDelta;
+      )!;
     const probes = [
-      probe({ fee: 30, t: 250 }, { fee: 60, t: null }), // current -> 0
+      probe({ fee: 30, t: 250 }, { fee: 60, t: null }), // current -> distance $60
       probe({ fee: 40, t: 250 }, { fee: 60, t: null }),
-      probe({ fee: 48, t: 250 }, { fee: 80, t: null }),
+      probe({ fee: 50, t: 250 }, { fee: 60, t: null }), // neutral, more abandonment
       probe({ fee: 30, t: 600 }, { fee: 60, t: null }),
       probe({ fee: 30, t: null }, { fee: 60, t: null }),
-      probe({ fee: 30, t: 250 }, { fee: 60, t: 215 }),
       probe({ fee: 30, t: 250 }, { fee: 58, t: null }),
-      probe({ fee: 58, t: 540 }, { fee: 120, t: null }), // near the computed optimum
+      probe({ fee: 29, t: 250 }, { fee: 60, t: null }), // freight shift via cheap std
+      probe({ fee: 58, t: 540 }, { fee: 120, t: null }), // old profiteering optimum
     ];
-    for (const delta of probes) {
-      expect(np.contributionDelta).toBeGreaterThanOrEqual(delta - 1e-9);
+    for (const p of probes) {
+      expect(strictlyBetterForCostRecovery(p, winner)).toBe(false);
     }
+    const oldOptimum = probes[probes.length - 1];
+    expect(isNeutralOf(oldOptimum)).toBe(false);
+    expect(strictlyBetterForCostRecovery(winner, oldOptimum)).toBe(true);
     // No dense $10-bin cluster exists in this book (all bins hold <3 orders), so the
     // unit-driven basket sweep has no candidates: keep current, no narrative.
     expect(bb.changedTiers).toEqual([]);
@@ -434,23 +485,30 @@ describe("recommendOptions", () => {
   });
 
   it("single-used-tier data degrades net-profit to the old 2D threshold x fee sweep (hand-verified)", () => {
-    // Current: std fee $10, FLAT, cost $7. One order, gross $185 (pays $10 today).
-    // Baseline net = 10 - 7 = 3. With no abandonment revenue is monotone in fee ->
-    // pins at maxFee = max(2*10, 30) = 30. At fee=30, T=190 keeps the order paying:
-    // delta (30-7)-3 = 20. Fee-major grid + strict > -> lowest fee then lowest
-    // threshold among ties -> fee 30, T 190. unconstrained (abandon 0) + capPinned.
+    // Current: std fee $10, FLAT, cost $7. One order, gross $185 (pays $10 today):
+    // rev $10 vs spend $7 -> distance $3 > band 2% x $7 = $0.14, over-recovering 143%.
+    // Neutral candidates need |fee - 7| <= 0.14 with the order still paying -> fee $7
+    // exactly (abandonment is 0, so EV weights are 1). The order pays whenever
+    // T >= 190 or T is null; thresholds iterate ascending inside the fee-major loop,
+    // so the first (kept) neutral is fee $7, T $190. All fee-7 candidates tie at
+    // contribution (7-7) - (10-7) = -$3.
+    // Materiality floor: -$3 < $1 BUT distance 0 < current distance 3 -> survives.
+    // unconstrained is ALWAYS false for this option now (overshoot is penalised, so
+    // the charge-more degeneracy cannot survive the neutrality objective); fee 7 and
+    // T 190 sit inside the swept ranges, so capPinned is false too.
     const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 } };
     const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 1, upliftWindow: 20, abandonRate: 0 };
     const np = recommendOptions([o(185, "standard")], cur, b, null).find(
       (r) => r.id === "net-profit"
     )!;
-    expect(np.scheme.standard!.fee).toBe(30);
+    expect(np.scheme.standard!.fee).toBe(7);
     expect(np.scheme.standard!.freeThreshold).toBe(190);
     expect(np.changedTiers).toEqual(["standard"]);
-    expect(np.contributionDelta).toBeCloseTo(20);
+    expect(np.contributionDelta).toBeCloseTo(-3);
+    expect(np.recoveryRate).toBeCloseTo(1);
     expect(np.upliftMarginGain).toBe(0); // uplift forced off
-    expect(np.unconstrained).toBe(true);
-    expect(np.capPinned).toBe(true);
+    expect(np.unconstrained).toBe(false);
+    expect(np.capPinned).toBe(false);
   });
 
   it("basket-builder without unitStats runs the slider sweep on the dominant tier (hand-verified)", () => {
@@ -472,7 +530,16 @@ describe("recommendOptions", () => {
     expect(bb.basketNarrative).toBeUndefined();
   });
 
-  it("does not flag unconstrained when abandonment is set", () => {
+  it("prices abandonment into the neutrality search (EV-neutral beats naive fee-equals-cost)", () => {
+    // 80 pays $10 today; 150/170 ship free. rev $10 / spend $21 -> distance $11.
+    // Hand-derivation under the spec comparator (confirmed by exhaustive search):
+    // - fee $7, all pay (T>=180): rev == spend exactly whatever abandons -> distance 0,
+    //   but the newly-paying 150/170 abandon 35% each (rate 0.5 per $10, $7 increase):
+    //   contribution = +11 - 0.35x(150+170)x0.5 = -$45.
+    // - fee $13, T $160 (170 stays free): w80 = 0.85 ($3 increase), w150 = 0.35
+    //   ($13 increase): rev 1.2x13 = $15.60, spend 1.2x7 + 7 = $15.40 -> distance
+    //   $0.20 <= band $0.308: ALSO neutral, contribution = 0.2 + 11 - 54.75 = -$43.55.
+    // Among neutral candidates the higher contribution wins -> fee 13, T 160.
     const orders = [o(80, "standard"), o(150, "standard"), o(170, "standard")];
     const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 7 } };
     const withAbandon: BehaviorParams = {
@@ -484,9 +551,12 @@ describe("recommendOptions", () => {
     const np = recommendOptions(orders, cur, withAbandon, null).find(
       (r) => r.id === "net-profit"
     )!;
+    expect(np.scheme.standard!.fee).toBe(13);
+    expect(np.scheme.standard!.freeThreshold).toBe(160);
+    expect(np.contributionDelta).toBeCloseTo(-43.55);
+    expect(np.recoveryRate).toBeGreaterThanOrEqual(0.98);
+    expect(np.recoveryRate).toBeLessThanOrEqual(1.02);
     expect(np.unconstrained).toBe(false);
-    // The current config (T=100, fee=10) is always a candidate, so never negative.
-    expect(np.contributionDelta).toBeGreaterThanOrEqual(0);
   });
 
   it("flags unconstrained when the basket-builder optimum pins at the sweep cap", () => {
@@ -501,11 +571,15 @@ describe("recommendOptions", () => {
     expect(bb.capPinned).toBe(true);
   });
 
-  it("sets capPinned=true when the net-profit fee optimum pins at the fee cap with non-zero abandonment", () => {
-    // Single used tier -> old 2D sweep. std fee $30, free over $250, cost $7; five
-    // orders 100..180 all paying $30 today; abandonRate 0.01. maxFee = 60; revenue
-    // beats abandonment loss all the way up -> the optimum pins at fee=60 (hand-
-    // verified in the v3 test this ports: delta 127.35 at fee 60 vs 123.25 at 59).
+  it("corrects a profiteering book to cost even at large negative contribution", () => {
+    // PROFITEERING CONTRACT (v4.1): std fee $30, free over $250, cost $7; five orders
+    // 100..180 all paying $30 today -> rev $150 / spend $35 = 429% recovery. The old
+    // objective pinned the fee at the $60 cap; the cost-recovery objective lowers it
+    // to cost: fee $7 (all still paying, first all-pay threshold T $190... here every
+    // gross < 250 already pays, ties keep the lowest threshold where all pay -> $190).
+    // contribution = (35-35) - (150-35) = -$115 — negative ON PURPOSE: the option's
+    // job is to stop profiteering, and the floor spares neutrality improvements
+    // (distance 0 < current distance 115).
     const cur: Scheme = {
       standard: { tier: "standard", fee: 30, freeThreshold: 250, avgCost: 7 },
     };
@@ -523,21 +597,122 @@ describe("recommendOptions", () => {
       o(180, "standard"),
     ];
     const np = recommendOptions(orders, cur, b, null).find((r) => r.id === "net-profit")!;
-    expect(np.scheme.standard!.fee).toBe(60); // pins at the cap
-    expect(np.unconstrained).toBe(false); // abandonRate > 0
-    expect(np.capPinned).toBe(true);
+    expect(np.scheme.standard!.fee).toBe(7);
+    expect(np.scheme.standard!.freeThreshold).toBe(190);
+    expect(np.changedTiers).toEqual(["standard"]);
+    expect(np.contributionDelta).toBeCloseTo(-115);
+    expect(np.recoveryRate).toBeCloseTo(1); // moved toward 1.0 from 4.29
+    expect(np.unconstrained).toBe(false);
+    expect(np.capPinned).toBe(false); // no longer pinned at the fee cap
   });
 
-  it("rounds the fee sweep ceiling up so the fee-pin guard works for non-integer fees", () => {
-    // std fee 16.55 -> ceiling ceil(33.1) = 34. With abandonment 0, revenue is
-    // monotone in fee, so net-profit pins at 34 and must be flagged.
+  it("sets capPinned=true when even the fee cap cannot reach neutrality (deep subsidy)", () => {
+    // std fee $10 flat, carrier cost $50: recovery 20%. maxFee = max(2x10, 30) = 30 —
+    // even $30 leaves distance $20 (vs $50 free / $40+ for lower fees), so the
+    // distance-minimising winner pins at the cap: fee $30, first paying T $90,
+    // contribution (30-50) - (10-50) = +$20. unconstrained stays false even at 0%
+    // abandonment — the always-false guarantee of the cost-recovery objective.
+    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 50 } };
+    const b: BehaviorParams = { cogsPercent: 0.3, upliftRate: 0, upliftWindow: 20, abandonRate: 0 };
+    const np = recommendOptions([o(80, "standard")], cur, b, null).find(
+      (r) => r.id === "net-profit"
+    )!;
+    expect(np.scheme.standard!.fee).toBe(30);
+    expect(np.scheme.standard!.freeThreshold).toBe(90);
+    expect(np.contributionDelta).toBeCloseTo(20);
+    expect(np.recoveryRate).toBeCloseTo(0.6); // closest the cap allows
+    expect(np.capPinned).toBe(true);
+    expect(np.unconstrained).toBe(false);
+  });
+
+  it("lowers a profiteering non-integer current fee to cost (fee lever still integer)", () => {
+    // std fee $16.55, T $100, cost $7; one order at $80 pays today -> 236% recovery.
+    // The integer fee lever finds the exact-neutral fee $7 (first paying T $90).
+    // contribution = (7-7) - (16.55-7) = -$9.55; survives the floor (distance 0 < 9.55).
     const cur: Scheme = { standard: { tier: "standard", fee: 16.55, freeThreshold: 100, avgCost: 7 } };
     const noAbandon: BehaviorParams = { cogsPercent: 0.5, upliftRate: 0, upliftWindow: 20, abandonRate: 0 };
     const np = recommendOptions([o(80, "standard")], cur, noAbandon, null).find(
       (r) => r.id === "net-profit"
     )!;
-    expect(np.scheme.standard!.fee).toBe(34);
-    expect(np.unconstrained).toBe(true);
+    expect(np.scheme.standard!.fee).toBe(7);
+    expect(np.scheme.standard!.freeThreshold).toBe(90);
+    expect(np.contributionDelta).toBeCloseTo(-9.55);
+    expect(np.recoveryRate).toBeCloseTo(1);
+    expect(np.unconstrained).toBe(false);
+  });
+
+  it("picks the higher-contribution candidate among two neutral candidates", () => {
+    // TWO-NEUTRAL CONTRACT (v4.1): std fee $5, T $100, cost $10 (subsidised: recovery
+    // 25%). Orders 80 (pays $5) and 150 (free). Two distinct neutral families exist:
+    // - fee $10 = cost, everyone pays (T >= 160): rev == spend exactly -> distance 0;
+    //   abandonment (5% on 80, 10% on 150) -> contribution +$5.50.
+    // - fee $22, T $90 (only 80 pays, 17% abandons): rev 0.83x22 = $18.26 vs spend
+    //   0.83x10 + 10 = $18.30 -> distance $0.04 <= band $0.366; contribution +$8.16.
+    // Both neutral -> the HIGHER CONTRIBUTION one must win even though its distance
+    // is larger. Also the subsidy contract: winner is neutral-band, contribution > 0.
+    const cur: Scheme = { standard: { tier: "standard", fee: 5, freeThreshold: 100, avgCost: 10 } };
+    const b: BehaviorParams = { cogsPercent: 0.5, upliftRate: 0, upliftWindow: 20, abandonRate: 0.1 };
+    const orders = [o(80, "standard"), o(150, "standard")];
+    const np = recommendOptions(orders, cur, b, null).find((r) => r.id === "net-profit")!;
+    expect(np.scheme.standard!.fee).toBe(22);
+    expect(np.scheme.standard!.freeThreshold).toBe(90);
+    expect(np.contributionDelta).toBeCloseTo(8.16);
+    expect(np.contributionDelta).toBeGreaterThan(0);
+    expect(np.recoveryRate).toBeGreaterThanOrEqual(0.98);
+    expect(np.recoveryRate).toBeLessThanOrEqual(1.02);
+    // Construct the rival neutral explicitly and verify the comparator ordering.
+    const rival = evaluateScheme(
+      orders,
+      cur,
+      { standard: { tier: "standard", fee: 10, freeThreshold: 200, avgCost: 10 } },
+      b
+    )!;
+    const winner = evaluateScheme(orders, cur, np.scheme, b)!;
+    expect(isNeutralOf(rival)).toBe(true);
+    expect(rival.contributionDelta).toBeCloseTo(5.5);
+    expect(strictlyBetterForCostRecovery(winner, rival)).toBe(true);
+  });
+
+  it("collapses to keep-current when the book is already neutral (materiality floor)", () => {
+    // fee $7 flat == cost $7: distance 0 already. The sweep's best candidate is
+    // current-equivalent (contribution $0 < $1) and NOT neutrality-improving
+    // (distance 0 is not < 0) -> keep-current: no changed tiers, exact zeros.
+    const cur: Scheme = { standard: { tier: "standard", fee: 7, freeThreshold: null, avgCost: 7 } };
+    const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 0, upliftWindow: 20, abandonRate: 0.1 };
+    const np = recommendOptions([o(185, "standard")], cur, b, null).find(
+      (r) => r.id === "net-profit"
+    )!;
+    expect(np.changedTiers).toEqual([]);
+    expect(np.scheme).toEqual(cur);
+    expect(np.contributionDelta).toBe(0);
+    expect(np.unconstrained).toBe(false);
+    expect(np.capPinned).toBe(false);
+  });
+
+  it("collapses an immaterial basket-builder winner (+$0.40) to keep-current", () => {
+    // MATERIALITY CONTRACT (v4.1): current flat $10, cost $7; one order at $187.
+    // Best basket candidate is T $200: the order builds (uplift 1.0), gaining
+    // (200-187) x 0.8 = $10.40 margin against $10 of lost fee -> +$0.40. Under $1 ->
+    // keep-current: changedTiers [], exact zeros, no narrative.
+    const cur: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: null, avgCost: 7 } };
+    const b: BehaviorParams = { cogsPercent: 0.2, upliftRate: 1, upliftWindow: 20, abandonRate: 0 };
+    const orders = [o(187, "standard")];
+    // Prove the +$0.40 candidate exists (so the floor, not the sweep, rejects it).
+    const best = evaluateScheme(
+      orders,
+      cur,
+      { standard: { tier: "standard", fee: 10, freeThreshold: 200, avgCost: 7 } },
+      b
+    )!;
+    expect(best.contributionDelta).toBeCloseTo(0.4);
+    const bb = recommendOptions(orders, cur, b, null).find((r) => r.id === "basket-builder")!;
+    expect(bb.changedTiers).toEqual([]);
+    expect(bb.scheme).toEqual(cur);
+    expect(bb.contributionDelta).toBe(0);
+    expect(bb.upliftMarginGain).toBe(0);
+    expect(bb.basketNarrative).toBeUndefined();
+    expect(bb.unconstrained).toBe(false);
+    expect(bb.capPinned).toBe(false);
   });
 
   it("excludes orders whose tier is not in the current scheme", () => {

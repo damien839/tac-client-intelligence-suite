@@ -2,7 +2,12 @@
 
 import { SchemeEvaluation } from "@/lib/shipping-sim/types";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/calculations";
-import { describeChangedTiers, freightShiftSentence, signedCurrency } from "../analysis/format";
+import {
+  describeChangedTiers,
+  freightShiftSentence,
+  recoveryMoveSentence,
+  signedCurrency,
+} from "../analysis/format";
 import { ReportOption } from "./types";
 
 interface VerdictCardProps {
@@ -49,6 +54,11 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
   const freeShiftFrom = formatPercent(currentFacts.freeOrderShare, 0);
   const freeShiftTo = formatPercent(w.freeOrderShare, 0);
 
+  // The cost-recovery option's objective is neutrality, not profit — when its scheme
+  // moves recovery closer to 100% than today, say so wherever contribution is cited.
+  const recoveryMove =
+    winner.key === "net-profit" ? recoveryMoveSentence(w, currentFacts) : null;
+
   // No option beats current — present the "keep current" path rather than a false win.
   if (delta <= 0) {
     return (
@@ -61,6 +71,12 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
           scheme is the defensible default; revisit after adjusting the assumptions or the
           Competitor benchmark scheme.
         </p>
+        {recoveryMove && (
+          <p className="text-sm text-tac-muted mb-2">
+            One exception worth weighing: the {winner.label} deliberately trades that
+            contribution for a neutral shipping P&amp;L. {recoveryMove}
+          </p>
+        )}
         {winner.unconstrained && (
           <p className="text-sm text-tac-warning mt-2">
             Reliability caveat: abandonment is 0%, so nothing in the model punishes charging more —
@@ -91,6 +107,7 @@ export default function VerdictCard({ rankedOptions, currentFacts, monthlyOrders
         .
       </p>
       {freightShift && <p className="text-sm text-tac-muted mb-2">{freightShift}</p>}
+      {recoveryMove && <p className="text-sm text-tac-muted mb-2">{recoveryMove}</p>}
       <p className="text-sm text-tac-muted mb-2">
         Its expected cost: {w.expectedOrdersLost.toFixed(1)} orders lost to abandonment, with the
         free-order share moving {freeShiftFrom} → {freeShiftTo}.

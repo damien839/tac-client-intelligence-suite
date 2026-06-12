@@ -1,4 +1,4 @@
-import { formatCurrency } from "@/lib/calculations";
+import { formatCurrency, formatPercent } from "@/lib/calculations";
 import {
   CANONICAL_TIERS,
   CanonicalTier,
@@ -67,4 +67,23 @@ export function freightShiftSentence(
       ? `, partly because ${evaluation.expectedOrdersLost.toFixed(1)} expected abandoned orders no longer ship`
       : "";
   return `It moves ${top.delta.toFixed(1)} orders to ${TIER_LABELS[top.tier]}; total carrier spend falls ${formatCurrency(carrierSaving)}${abandonSuffix}.`;
+}
+
+/**
+ * Cost-recovery narrative (v4.1): shown for the Cost-recovery optimiser when its
+ * scheme moves cost recovery strictly closer to 100% than the current scheme —
+ * the option's actual objective, stated next to the contribution figure.
+ * Returns null when recovery didn't move toward break-even.
+ */
+export function recoveryMoveSentence(
+  evaluation: SchemeEvaluation,
+  currentFacts: SchemeEvaluation
+): string | null {
+  if (Math.abs(evaluation.recoveryRate - 1) >= Math.abs(currentFacts.recoveryRate - 1)) {
+    return null;
+  }
+  return `It takes cost recovery from ${formatPercent(currentFacts.recoveryRate, 1)} to ${formatPercent(
+    evaluation.recoveryRate,
+    1
+  )} — shipping revenue moves to match freight cost.`;
 }

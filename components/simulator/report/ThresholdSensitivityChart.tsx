@@ -39,8 +39,8 @@ export default function ThresholdSensitivityChart({
       <p className="text-sm text-tac-muted mb-4">
         How the outcome changes as the {tierLabel} free-over threshold moves (fee held at
         current). The gap between the lines is the basket-building effect; steep regions are
-        where the threshold decision matters. This isolates one lever — the Net profit
-        maximiser may move several at once (fees and the other service&apos;s line), which this
+        where the threshold decision matters. This isolates one lever — the Cost-recovery
+        optimiser may move several at once (fees and the other service&apos;s line), which this
         curve can&apos;t show.
       </p>
       <ResponsiveContainer width="100%" height={280}>

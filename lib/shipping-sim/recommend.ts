@@ -34,6 +34,40 @@ const FINE_FEE_STEP = 1;
 /** Above this many prepared buckets the coarse steps double (same spirit as the bucket cap). */
 const COARSE_DOUBLE_BUCKETS = 1500;
 
+/** v4.1 cost-neutral objective: |revenue - cost| within 2% of the candidate's carrier spend. */
+const NEUTRAL_BAND = 0.02;
+/** v4.1 materiality floor: sweep winners below this many $ collapse to keep-current. */
+const MIN_MATERIAL_DELTA = 1;
+
+function neutralDistance(result: BehavioralResult): number {
+  return Math.abs(result.shippingRevenue - result.carrierSpend);
+}
+
+function isNeutral(result: BehavioralResult): boolean {
+  return neutralDistance(result) <= NEUTRAL_BAND * result.carrierSpend;
+}
+
+/**
+ * Cost-recovery comparator (v4.1, spec lexicographic objective): neutral candidates
+ * beat non-neutral; among neutral, higher contribution wins (rewards freight shifting
+ * and low abandonment); among non-neutral, smaller distance to neutral wins,
+ * tie-broken by contribution. Strict better-than, so iteration order keeps the
+ * existing tie preference (the earliest candidate considered wins ties).
+ */
+function betterForCostRecovery(
+  a: { result: BehavioralResult; contributionDelta: number },
+  b: { result: BehavioralResult; contributionDelta: number }
+): boolean {
+  const aNeutral = isNeutral(a.result);
+  const bNeutral = isNeutral(b.result);
+  if (aNeutral !== bNeutral) return aNeutral;
+  if (aNeutral) return a.contributionDelta > b.contributionDelta;
+  const dA = neutralDistance(a.result);
+  const dB = neutralDistance(b.result);
+  if (dA !== dB) return dA < dB;
+  return a.contributionDelta > b.contributionDelta;
+}
+
 /** Shared inputs for one recommendation run. */
 interface SweepContext {
   prepared: PreparedBucket[];
@@ -172,17 +206,26 @@ interface NetProfitCandidate {
 }
 
 /**
- * Multi-tier net-profit sweep: stdT x stdFee x expFee x expT, uplift forced off,
- * abandonment live. Coarse argmax then ONE refine pass (+-1 coarse step around the
- * numeric winners at $10/$1/$1).
+ * Multi-tier cost-recovery sweep: stdT x stdFee x expFee x expT, uplift forced off,
+ * abandonment live, ranked by the v4.1 lexicographic comparator (neutral first, then
+ * contribution / distance-to-neutral). Coarse pass, then refine passes (+-1 coarse
+ * step around the numeric winners at $10/$1/$1).
+ *
+ * TWO refine seeds (as-built v4.1 amendment): the neutral set is a thin manifold in
+ * fee space (often a single $1 fee value), so the coarse grid can miss the best
+ * neutral basin entirely while containing a much worse neutral elsewhere — which
+ * would then dominate the argmax and trap the single refine pass. The best
+ * NON-neutral coarse candidate (smallest distance to neutral) brackets where the
+ * manifold crosses between coarse grid points, so we refine around it as well.
+ * The final winner is the comparator-best over every candidate considered.
  *
  * Budget: coarse = |stdT| x |stdFee| x |expFee| x |expT|. On a typical book (fees
  * ~$30/$60, p95 ~$600, no dense clusters) that is ~33 x 31 x 61 x 1 ~= 62k scheme
  * evaluations; the theoretical worst (threshold cap $1000, both fees high, 8 unit
  * candidates) is far larger, so above COARSE_DOUBLE_BUCKETS prepared buckets the
- * coarse steps double ($40/$4), quartering the numeric grid. The refine pass adds
+ * coarse steps double ($40/$4), quartering the numeric grid. Each refine pass adds
  * at most 5 x 5 x 5 = 125 evaluations at base steps (9 per lever -> up to 729 when
- * the coarse steps are doubled for large bucket counts).
+ * the coarse steps are doubled for large bucket counts); two seeds double that.
  */
 function sweepNetProfitMultiTier(
   ctx: SweepContext,
@@ -213,20 +256,34 @@ function sweepNetProfitMultiTier(
     [expTier]: { ...expConfig, fee: c.expFee, freeThreshold: c.expT },
   });
 
-  let best:
-    | { cand: NetProfitCandidate; scheme: Scheme; result: BehavioralResult; contributionDelta: number }
-    | null = null;
+  interface Considered {
+    cand: NetProfitCandidate;
+    scheme: Scheme;
+    result: BehavioralResult;
+    contributionDelta: number;
+  }
+  // Mutable record (not closed-over lets) so reads after the loops keep the declared
+  // nullable type — TS control-flow analysis can't see closure assignments.
+  const tracked: { best: Considered | null; nonNeutral: Considered | null } = {
+    best: null,
+    nonNeutral: null,
+  };
   const consider = (cand: NetProfitCandidate) => {
     const scheme = makeScheme(cand);
     const { result, contributionDelta } = contributionOf(ctx, scheme, noUplift);
-    if (!best || contributionDelta > best.contributionDelta) {
-      best = { cand, scheme, result, contributionDelta };
+    const entry: Considered = { cand, scheme, result, contributionDelta };
+    if (!tracked.best || betterForCostRecovery(entry, tracked.best)) tracked.best = entry;
+    if (
+      !isNeutral(result) &&
+      (!tracked.nonNeutral || betterForCostRecovery(entry, tracked.nonNeutral))
+    ) {
+      tracked.nonNeutral = entry;
     }
   };
 
-  // Coarse pass. Strict > keeps the first of tied candidates: lowest value for the
-  // ascending numeric levers; for the discrete express-threshold lever the order is
-  // current -> null -> candidates, so ties prefer keeping the current express line.
+  // Coarse pass. Strict better-than keeps the first of tied candidates: lowest value
+  // for the ascending numeric levers; for the discrete express-threshold lever the
+  // order is current -> null -> candidates, so ties prefer the current express line.
   for (const expT of expThresholds) {
     for (const expFee of expFees) {
       for (const stdT of stdThresholds) {
@@ -236,11 +293,12 @@ function sweepNetProfitMultiTier(
       }
     }
   }
-  if (!best) throw new Error("net-profit sweep evaluated no candidates");
-  const coarse: { cand: NetProfitCandidate } = best;
+  const coarse = tracked.best;
+  if (!coarse) throw new Error("net-profit sweep evaluated no candidates");
+  const coarseNonNeutral = tracked.nonNeutral;
 
-  // Refine pass: +-1 coarse step around each numeric winner at fine steps. The expT
-  // lever is a discrete data-driven set, not a range — it stays at its winner.
+  // Refine passes: +-1 coarse step around each numeric winner at fine steps. The expT
+  // lever is a discrete data-driven set, not a range — it stays at its seed's value.
   const refineRange = (center: number, coarseStep: number, fineStep: number, max: number): number[] => {
     const values = new Set<number>([center]);
     for (let v = center - coarseStep; v <= center + coarseStep; v += fineStep) {
@@ -248,29 +306,34 @@ function sweepNetProfitMultiTier(
     }
     return Array.from(values).sort((a, b) => a - b);
   };
-  const fineStdThresholds: (number | null)[] =
-    coarse.cand.stdT === null
-      ? [null]
-      : refineRange(coarse.cand.stdT, thresholdStep, FINE_THRESHOLD_STEP, maxThreshold);
-  const fineStdFees = refineRange(coarse.cand.stdFee, feeStep, FINE_FEE_STEP, maxStdFee);
-  const fineExpFees = refineRange(coarse.cand.expFee, feeStep, FINE_FEE_STEP, maxExpFee);
-  for (const stdT of fineStdThresholds) {
-    for (const stdFee of fineStdFees) {
-      for (const expFee of fineExpFees) {
-        consider({ stdT, stdFee, expT: coarse.cand.expT, expFee });
+  const refineAround = (seed: NetProfitCandidate) => {
+    const fineStdThresholds: (number | null)[] =
+      seed.stdT === null
+        ? [null]
+        : refineRange(seed.stdT, thresholdStep, FINE_THRESHOLD_STEP, maxThreshold);
+    const fineStdFees = refineRange(seed.stdFee, feeStep, FINE_FEE_STEP, maxStdFee);
+    const fineExpFees = refineRange(seed.expFee, feeStep, FINE_FEE_STEP, maxExpFee);
+    for (const stdT of fineStdThresholds) {
+      for (const stdFee of fineStdFees) {
+        for (const expFee of fineExpFees) {
+          consider({ stdT, stdFee, expT: seed.expT, expFee });
+        }
       }
     }
+  };
+  refineAround(coarse.cand);
+  // Second seed: the closest-to-neutral NON-neutral coarse candidate brackets the
+  // thin neutral manifold the coarse grid may have stepped over (see doc above).
+  if (coarseNonNeutral && coarseNonNeutral.cand !== coarse.cand) {
+    refineAround(coarseNonNeutral.cand);
   }
 
-  const winner: { cand: NetProfitCandidate; scheme: Scheme; result: BehavioralResult; contributionDelta: number } =
-    best;
-  const unconstrained =
-    behavior.abandonRate === 0 &&
-    (winner.cand.stdT === null ||
-      winner.cand.stdT === maxThreshold ||
-      winner.result.freeOrderShare === 0 ||
-      winner.cand.stdFee === maxStdFee ||
-      winner.cand.expFee === maxExpFee);
+  const winner: Considered = tracked.best ?? coarse;
+  // v4.1: the charge-more degeneracy cannot survive the neutrality objective —
+  // overshooting cost is penalised by distance even with abandonment at 0 — so the
+  // old unconstrained guard arms (flat / top-of-range / charges-everyone optimum at
+  // 0% abandonment) no longer mark unreliable optima. Always false for this option.
+  const unconstrained = false;
   const capPinned =
     winner.cand.stdT === maxThreshold ||
     winner.cand.stdFee === maxStdFee ||
@@ -285,9 +348,12 @@ function sweepNetProfitMultiTier(
 }
 
 /**
- * Single-used-tier degradation of the net-profit sweep: the old full-resolution 2D
- * threshold x fee grid on that tier ($10 / $1 steps), uplift forced off, abandonment
- * live. Fee-major iteration + strict > keep ties at the lowest fee, then threshold.
+ * Single-used-tier degradation of the cost-recovery sweep: the old full-resolution
+ * 2D threshold x fee grid on that tier ($10 / $1 steps), uplift forced off,
+ * abandonment live, ranked by the v4.1 lexicographic comparator. Full resolution
+ * means the thin neutral manifold is always visible — no second seed needed here.
+ * Fee-major iteration + strict better-than keep ties at the lowest fee, then the
+ * lowest threshold.
  */
 function sweepNetProfitSingleTier(
   ctx: SweepContext,
@@ -309,7 +375,7 @@ function sweepNetProfitSingleTier(
     for (const threshold of thresholds) {
       const scheme: Scheme = { ...ctx.current, [tier]: { ...target, fee, freeThreshold: threshold } };
       const { result, contributionDelta } = contributionOf(ctx, scheme, noUplift);
-      if (!best || contributionDelta > best.contributionDelta) {
+      if (!best || betterForCostRecovery({ result, contributionDelta }, best)) {
         best = { threshold, fee, scheme, result, contributionDelta };
       }
     }
@@ -317,15 +383,13 @@ function sweepNetProfitSingleTier(
   if (!best) throw new Error("net-profit sweep evaluated no candidates");
   const winner: NonNullable<typeof best> = best;
 
-  // Degeneracy guard: with abandonment off nothing punishes charging more — flag
-  // charges-everyone, flat, and range-edge optima. Cap-pinned: the optimum sits at
-  // the sweep edge, so the true best may lie beyond (null is a complete answer).
-  const unconstrained =
-    behavior.abandonRate === 0 &&
-    (winner.threshold === null ||
-      winner.threshold === maxThreshold ||
-      winner.result.freeOrderShare === 0 ||
-      winner.fee === maxFee);
+  // v4.1: unconstrained is always false for the cost-recovery option — the old guard
+  // existed because with abandonment off nothing punished charging more; under the
+  // neutrality objective overshoot is penalised by distance, so the charge-more
+  // degeneracy (flat / top-of-range / charges-everyone optima) cannot win.
+  // Cap-pinned is unchanged: the optimum sits at the sweep edge, so the true best
+  // may lie beyond it (happens when even the fee cap cannot reach the neutral band).
+  const unconstrained = false;
   const capPinned = winner.threshold === maxThreshold || winner.fee === maxFee;
   return {
     scheme: winner.scheme,
@@ -401,17 +465,12 @@ function sweepBasketUnitDriven(
     }
   }
 
-  if (!best || best.contributionDelta <= 0) {
-    // Keep current: nothing in the unit-driven candidate set beats today's scheme.
-    // Evaluating current-vs-current is a strict no-op, so deltas are exactly zero.
-    const { result, contributionDelta } = contributionOf(ctx, { ...current }, params);
-    return {
-      scheme: { ...current },
-      result,
-      contributionDelta,
-      unconstrained: false,
-      capPinned: false,
-    };
+  if (!best || best.contributionDelta < MIN_MATERIAL_DELTA) {
+    // Keep current: nothing in the unit-driven candidate set beats today's scheme by
+    // a MATERIAL margin (v4.1 floor — float-dust winners that display as +$0.00 must
+    // not unseat the current scheme). Evaluating current-vs-current is a strict
+    // no-op, so deltas are exactly zero.
+    return keepCurrentWinner(ctx, params);
   }
 
   const winner: NonNullable<typeof best> = best;
@@ -431,6 +490,49 @@ function sweepBasketUnitDriven(
     capPinned: false,
     basketNarrative,
   };
+}
+
+/**
+ * The "keep the current scheme" winner: evaluating current-vs-current with any
+ * params is a strict no-op (guaranteed by the revealed-preference uplift guard and
+ * the strict worse-off abandonment test), so every delta is exactly zero.
+ */
+function keepCurrentWinner(ctx: SweepContext, params: BehaviorParams): SweepWinner {
+  const { result, contributionDelta } = contributionOf(ctx, { ...ctx.current }, params);
+  return {
+    scheme: { ...ctx.current },
+    result,
+    contributionDelta,
+    unconstrained: false,
+    capPinned: false,
+  };
+}
+
+/**
+ * v4.1 materiality floor, applied to each sweep's winner: collapse to keep-current
+ * when the winner makes less than MIN_MATERIAL_DELTA ($1) of expected contribution.
+ *
+ * Cost-recovery interaction (`spareNeutralityGains`): closing a subsidy RAISES
+ * contribution, so a genuine neutrality improvement is material unless the book is
+ * already neutral — but correcting an OVERSHOOT (e.g. 149% recovery back to ~100%)
+ * LOWERS revenue and shows a negative contribution on purpose. The floor therefore
+ * spares any winner that moves |revenue - cost| strictly closer to zero than the
+ * current scheme; it only collapses winners that neither make material money nor
+ * get the book closer to neutral. The basket-builder's objective is unchanged
+ * (pure contribution), so it uses the simple floor.
+ */
+function applyMaterialityFloor(
+  ctx: SweepContext,
+  winner: SweepWinner,
+  params: BehaviorParams,
+  spareNeutralityGains: boolean
+): SweepWinner {
+  if (winner.contributionDelta >= MIN_MATERIAL_DELTA) return winner;
+  const keep = keepCurrentWinner(ctx, params);
+  if (spareNeutralityGains && neutralDistance(winner.result) < neutralDistance(keep.result)) {
+    return winner;
+  }
+  return keep;
 }
 
 /**
@@ -477,15 +579,20 @@ function sweepBasketFallback(
 }
 
 /**
- * Run the two v4 recommendation sweeps.
- * - net-profit: bounded multi-tier sweep (std threshold x std fee x exp fee x exp
- *   threshold from unit-driven candidates), uplift forced off; single-used-tier
- *   data degrades to the old 2D sweep on that tier.
+ * Run the two recommendation sweeps (v4 levers, v4.1 objectives).
+ * - net-profit ("Cost-recovery optimiser"): bounded multi-tier sweep (std threshold
+ *   x std fee x exp fee x exp threshold from unit-driven candidates), uplift forced
+ *   off; single-used-tier data degrades to the old 2D sweep on that tier. Objective
+ *   (v4.1): lexicographic cost recovery — candidates whose |revenue - cost| is
+ *   within 2% of carrier spend are neutral; among neutral, max contribution wins;
+ *   otherwise minimise the distance to neutral (tie-broken by contribution).
  * - basket-builder: unit-driven thresholds (clusters + one typical unit, window
  *   overridden to the typical unit price) when unitStats is present; otherwise the
- *   previous slider-window sweep on the dominant paid tier.
- * Abandonment applies to both. Objective: expected total contribution delta vs the
- * current scheme (shipping P&L + product-margin effects).
+ *   previous slider-window sweep on the dominant paid tier. Objective: expected
+ *   total contribution delta vs the current scheme (shipping P&L + product-margin
+ *   effects).
+ * Abandonment applies to both. Winners under the $1 materiality floor collapse to
+ * keep-current (cost-recovery spares neutrality improvements).
  */
 export function recommendOptions(
   orders: TaggedOrder[],
@@ -513,10 +620,22 @@ export function recommendOptions(
   } else {
     netProfit = sweepNetProfitSingleTier(ctx, valid, behavior, usedTiers[0]);
   }
+  // Materiality floor (v4.1) — evaluated with each option's own params so the
+  // keep-current evaluation is the exact no-op the comparison table will show.
+  // Cost-recovery spares neutrality improvements (see applyMaterialityFloor).
+  netProfit = applyMaterialityFloor(ctx, netProfit, { ...behavior, upliftRate: 0 }, true);
 
-  const basket = unitStats
-    ? sweepBasketUnitDriven(ctx, valid, behavior, unitStats, usedTiers)
-    : sweepBasketFallback(ctx, valid, behavior, dominant);
+  const basketParams: BehaviorParams = unitStats
+    ? { ...behavior, upliftWindow: unitStats.typicalUnitPrice }
+    : behavior;
+  const basket = applyMaterialityFloor(
+    ctx,
+    unitStats
+      ? sweepBasketUnitDriven(ctx, valid, behavior, unitStats, usedTiers)
+      : sweepBasketFallback(ctx, valid, behavior, dominant),
+    basketParams,
+    false
+  );
 
   const toRecommended = (
     id: RecommendedScheme["id"],
@@ -540,7 +659,7 @@ export function recommendOptions(
   });
 
   return [
-    toRecommended("net-profit", "Net profit maximiser", netProfit),
+    toRecommended("net-profit", "Cost-recovery optimiser", netProfit),
     toRecommended("basket-builder", "Basket-builder", basket),
   ];
 }
