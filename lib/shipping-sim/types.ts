@@ -160,7 +160,7 @@ export interface BehavioralResult {
 
 export type RecommendationId = "net-profit" | "basket-builder";
 
-/** Behavioural metrics for one arbitrary candidate scheme (used for the Custom comparison column). */
+/** Behavioural metrics for one arbitrary candidate scheme (used for the Competitor benchmark column). */
 export interface SchemeEvaluation {
   contributionDelta: number;
   netShippingProfitDelta: number;

@@ -59,7 +59,7 @@ function movementSummary(outcome: SegmentOutcome | undefined): string {
     { label: "abandon", value: outcome.abandons },
   ]
     .filter((movement) => movement.value >= MOVEMENT_FLOOR)
-    .toSorted((a, b) => b.value - a.value)
+    .sort((a, b) => b.value - a.value)
     .slice(0, 2);
   if (movements.length === 0) return "no change";
   return movements.map((m) => `${m.value.toFixed(1)} ${m.label}`).join(" · ");

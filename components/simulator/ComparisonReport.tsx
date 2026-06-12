@@ -88,14 +88,21 @@ export default function ComparisonReport({
 
   // AOV markers: one per numeric free-over line an option CHANGES (deduped within
   // each option — two tiers landing on the same threshold need only one mark).
+  // Only tiers where the free threshold genuinely changes (fee-only changes are excluded
+  // so we don't draw misleading threshold lines).
   const markers: ThresholdMarker[] = [
     ...(currentThreshold !== null
       ? [{ value: currentThreshold, label: "Now", color: NEUTRAL_COLOR }]
       : []),
     ...options.flatMap((option) => {
       const thresholds = option.changedTiers
-        .map((tier) => option.scheme[tier]?.freeThreshold)
-        .filter((value): value is number => value !== null && value !== undefined);
+        .filter(
+          (tier) =>
+            option.scheme[tier]?.freeThreshold !== currentScheme[tier]?.freeThreshold &&
+            option.scheme[tier]?.freeThreshold !== null &&
+            option.scheme[tier]?.freeThreshold !== undefined
+        )
+        .map((tier) => option.scheme[tier]!.freeThreshold as number);
       return Array.from(new Set(thresholds)).map((value) => ({
         value,
         label: option.shortLabel,
@@ -105,7 +112,8 @@ export default function ComparisonReport({
   ];
 
   // Sensitivity-chart markers: only options that actually move the swept (dominant)
-  // tier's free-over line to a numeric value get a reference line.
+  // tier's free-over line to a different numeric value get a reference line.
+  // Fee-only changes don't shift the threshold and must not draw a misleading line.
   const sensitivityMarkers: ThresholdMarker[] =
     dominantTier === null
       ? []
@@ -113,6 +121,7 @@ export default function ComparisonReport({
           if (!option.changedTiers.includes(dominantTier)) return [];
           const threshold = option.scheme[dominantTier]?.freeThreshold;
           if (threshold === null || threshold === undefined) return [];
+          if (threshold === currentScheme[dominantTier]?.freeThreshold) return [];
           return [{ value: threshold, label: option.shortLabel, color: option.color }];
         });
 

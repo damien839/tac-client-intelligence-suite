@@ -231,10 +231,19 @@ export default function StepProposal({
 
   // Single source for the printed assumptions line — built from the deferred values the
   // metrics were actually computed from, so caption and numbers stay consistent mid-drag.
+  // Unit mode: the basket window is auto-set to one typical unit price and applies to the
+  // Basket-builder column, the Competitor benchmark column, segments, and the sensitivity
+  // curve; only Net profit maximiser runs with uplift off.
+  const uplift = Math.round(deferredUplift * 100);
+  const abandon = Math.round(deferredAbandon * 100);
+  const cogs = Math.round((deferredCogs ?? 0) * 100);
+  const n = currentFacts?.orderCount ?? 0;
   const windowClause = unitStats
-    ? `window auto-set to one unit (~$${Math.round(unitStats.typicalUnitPrice)}) for Basket-builder from your line items`
-    : `within $${deferredWindow} below the threshold`;
-  const assumptionEcho = `Assumptions: ${Math.round(deferredUplift * 100)}% of orders just below a new threshold build baskets (${windowClause}); ${Math.round(deferredAbandon * 100)}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${Math.round((deferredCogs ?? 0) * 100)}%. Deltas are expected values vs the observed current baseline over ${currentFacts?.orderCount ?? 0} orders.`;
+    ? `the basket window is auto-set to one unit (~$${Math.round(unitStats.typicalUnitPrice)}) from your line items`
+    : `within $${deferredWindow} below a new threshold`;
+  const assumptionEcho = unitStats
+    ? `Assumptions: ${uplift}% of orders just below a new threshold build baskets (applies to the Basket-builder and Competitor columns; the Net profit maximiser models price response only); the basket window is auto-set to one unit (~$${Math.round(unitStats.typicalUnitPrice)}) from your line items; ${abandon}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${cogs}%. Deltas are expected values vs the observed current baseline over ${n} orders.`
+    : `Assumptions: ${uplift}% of orders just below a new threshold build baskets (applies to the Basket-builder and Competitor columns; the Net profit maximiser models price response only); ${windowClause}; ${abandon}% of worse-off orders abandon per $10 of shipping-cost increase; COGS ${cogs}%. Deltas are expected values vs the observed current baseline over ${n} orders.`;
 
   return (
     <div className="space-y-8">
