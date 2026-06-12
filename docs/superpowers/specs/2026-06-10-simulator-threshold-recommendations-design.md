@@ -184,6 +184,13 @@ Auto-derived segments, computed per option: item count (1 / 2 / 3+) × position 
 - Conversion-gain lever for price decreases (raised 2026-06-10, still open — revisit after v4).
 - Multi-market/currency handling; per-item express surcharges (the "after the 3rd item" idea resolved to unit-driving thresholds instead).
 
+## v4.1 — cost-neutral objective + materiality floor (2026-06-12, after Damo's real-data run of v4)
+
+Real data exposed two problems:
+
+1. **The maximiser profiteers on freight.** It recommended std $60 / exp $92 → 149.3% cost recovery (+$10,860) by exploiting price-parity switching. Damo: "completely unreasonable… the net profit maximiser should focus on recovering all shipping costs so there is a net neutral outcome on shipping revenue and cost." **New objective for Option 1 (renamed "Cost-recovery optimiser", id stays `net-profit`):** lexicographic — (a) candidates whose |shippingRevenue − carrierSpend| ≤ 2% of their carrierSpend are "neutral"; among neutral candidates pick max contributionDelta (rewards freight shifting and low abandonment); (b) if no candidate is neutral, minimise the distance to neutral, tie-broken by contribution. Levers and sweeps unchanged. The charge-more degeneracy disappears under this objective (overshoot is penalised by distance), so `unconstrained` is always false for this option; `capPinned` stays. Expected behaviour on Damo's book: shift freight to standard, then LOWER fees until revenue ≈ the reduced cost — customers pay less, subsidy closes, recovery ≈ 100%.
+2. **Float-dust winners.** Basket-builder recommended a changed scheme showing +$0.00 (delta below display precision beat keep-current). **Materiality floor:** any sweep winner with `contributionDelta < $1` collapses to keep-current (changedTiers [], exact-zero metrics, no narrative). Applies to both options.
+
 ### v1 UI (superseded, kept for history)
 
 Three cards with one-click Apply writing into the proposal inputs; "applied" state on the matching card. Replaced because applying mutated the single report instead of presenting the three options side by side.
