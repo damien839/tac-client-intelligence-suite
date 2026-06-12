@@ -186,6 +186,38 @@ export interface ThresholdCurvePoint {
   contributionWithUplift: number; // same, basket-building per the caller's params
 }
 
+/** Buying-behaviour band by line-item count; "unknown" when no line-item data. */
+export type ItemBand = "single" | "double" | "threePlus" | "unknown";
+
+/**
+ * Where an order's value sits vs its CURRENT tier's free threshold:
+ * at/above it, within one unit-window below it, or well below it.
+ * Convention for flat tiers (no threshold): there is nothing to build toward, so
+ * orders are "wellBelow" — unless the flat fee is 0 (everyone already ships free),
+ * which reports "atOrAbove".
+ */
+export type ValuePosition = "wellBelow" | "withinOneUnit" | "atOrAbove";
+
+/** One buying-behaviour segment of the order book vs the current scheme. */
+export interface Segment {
+  key: string; // e.g. "single|withinOneUnit|standard"
+  itemBand: ItemBand;
+  position: ValuePosition;
+  tier: CanonicalTier;
+  orders: number;
+  valueShare: number; // share of total gross across analysable orders, 0..1
+}
+
+/** EV-weighted order outcomes for one segment under a candidate scheme. */
+export interface SegmentOutcome {
+  segmentKey: string;
+  pays: number;
+  free: number;
+  builds: number;
+  switches: number;
+  abandons: number;
+}
+
 /** One recommendation card. */
 export interface RecommendedScheme {
   id: RecommendationId;
