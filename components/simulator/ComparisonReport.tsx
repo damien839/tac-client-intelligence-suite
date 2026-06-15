@@ -15,6 +15,7 @@ import ReconciliationBadge from "./analysis/ReconciliationBadge";
 import AovDistribution, { ThresholdMarker } from "./analysis/AovDistribution";
 import { NEUTRAL_COLOR, ReportOption } from "./report/types";
 import VerdictCard from "./report/VerdictCard";
+import HowToReadCard from "./report/HowToReadCard";
 import ContributionDecomposition from "./report/ContributionDecomposition";
 import RecoveryFreeShareChart from "./report/RecoveryFreeShareChart";
 import SegmentMigration from "./report/SegmentMigration";
@@ -148,6 +149,8 @@ export default function ComparisonReport({
       </div>
 
       <ReconciliationBadge reconciliation={reconciliation} />
+
+      <HowToReadCard />
 
       <VerdictCard
         rankedOptions={rankedOptions}
