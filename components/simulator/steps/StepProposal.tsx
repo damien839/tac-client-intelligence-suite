@@ -20,6 +20,7 @@ import {
   thresholdCurves,
 } from "@/lib/shipping-sim/recommend";
 import { segmentOrders, segmentOutcomes } from "@/lib/shipping-sim/segments";
+import { curveStats } from "@/lib/shipping-sim/curve";
 import {
   BehaviorParams,
   CanonicalTier,
@@ -124,7 +125,11 @@ export default function StepProposal({
     [orders, currentScheme]
   );
 
-  const grossValues = useMemo(() => validOrders.map((order) => order.gross), [validOrders]);
+  // Descriptive anatomy of the current order book — drives the Curve Anatomy section.
+  const stats = useMemo(
+    () => curveStats(validOrders, currentScheme, dominantTier),
+    [validOrders, currentScheme, dominantTier]
+  );
 
   const reconciliation = useMemo<Reconciliation | null>(() => {
     if (!currentFacts) return null;
@@ -319,7 +324,7 @@ export default function StepProposal({
           dominantTier={dominantTier}
           reconciliation={reconciliation}
           curves={curves}
-          grossValues={grossValues}
+          stats={stats}
           segments={segments}
           outcomesByOption={outcomesByOption}
           segmentWindow={effectiveWindow}

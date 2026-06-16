@@ -13,8 +13,7 @@ import {
 } from "recharts";
 import { ThresholdCurvePoint } from "@/lib/shipping-sim/types";
 import { formatCurrency } from "@/lib/calculations";
-import { ThresholdMarker } from "../analysis/AovDistribution";
-import { AXIS_TICK, GRID_STROKE, NEUTRAL_COLOR, TOOLTIP_STYLE } from "./types";
+import { AXIS_TICK, GRID_STROKE, NEUTRAL_COLOR, ThresholdMarker, TOOLTIP_STYLE } from "./types";
 
 interface ThresholdSensitivityChartProps {
   curves: ThresholdCurvePoint[];

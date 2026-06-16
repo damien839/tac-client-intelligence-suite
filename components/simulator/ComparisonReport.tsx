@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import {
   CanonicalTier,
+  CurveStats,
   Reconciliation,
   Scheme,
   SchemeEvaluation,
@@ -12,10 +13,10 @@ import {
   TIER_LABELS,
 } from "@/lib/shipping-sim/types";
 import ReconciliationBadge from "./analysis/ReconciliationBadge";
-import AovDistribution, { ThresholdMarker } from "./analysis/AovDistribution";
-import { NEUTRAL_COLOR, ReportOption } from "./report/types";
+import { ReportOption, ThresholdMarker } from "./report/types";
 import VerdictCard from "./report/VerdictCard";
 import HowToReadCard from "./report/HowToReadCard";
+import CurveAnatomy from "./report/CurveAnatomy";
 import ContributionDecomposition from "./report/ContributionDecomposition";
 import RecoveryFreeShareChart from "./report/RecoveryFreeShareChart";
 import SegmentMigration from "./report/SegmentMigration";
@@ -32,7 +33,8 @@ interface ComparisonReportProps {
   dominantTier: CanonicalTier | null;
   reconciliation: Reconciliation;
   curves: ThresholdCurvePoint[];
-  grossValues: number[];
+  /** Descriptive anatomy of the current order book — drives the Curve Anatomy section. */
+  stats: CurveStats;
   /** Buying-behaviour segments of the order book vs the current scheme. */
   segments: Segment[];
   /** Per-option segment outcomes, keyed by option key. */
@@ -63,7 +65,7 @@ export default function ComparisonReport({
   dominantTier,
   reconciliation,
   curves,
-  grossValues,
+  stats,
   segments,
   outcomesByOption,
   segmentWindow,
@@ -86,31 +88,6 @@ export default function ComparisonReport({
     ? currentScheme[dominantTier]?.freeThreshold ?? null
     : null;
   const tierLabel = TIER_LABELS[dominantTier ?? "standard"];
-
-  // AOV markers: one per numeric free-over line an option CHANGES (deduped within
-  // each option — two tiers landing on the same threshold need only one mark).
-  // Only tiers where the free threshold genuinely changes (fee-only changes are excluded
-  // so we don't draw misleading threshold lines).
-  const markers: ThresholdMarker[] = [
-    ...(currentThreshold !== null
-      ? [{ value: currentThreshold, label: "Now", color: NEUTRAL_COLOR }]
-      : []),
-    ...options.flatMap((option) => {
-      const thresholds = option.changedTiers
-        .filter(
-          (tier) =>
-            option.scheme[tier]?.freeThreshold !== currentScheme[tier]?.freeThreshold &&
-            option.scheme[tier]?.freeThreshold !== null &&
-            option.scheme[tier]?.freeThreshold !== undefined
-        )
-        .map((tier) => option.scheme[tier]!.freeThreshold as number);
-      return Array.from(new Set(thresholds)).map((value) => ({
-        value,
-        label: option.shortLabel,
-        color: option.color,
-      }));
-    }),
-  ];
 
   // Sensitivity-chart markers: only options that actually move the swept (dominant)
   // tier's free-over line to a different numeric value get a reference line.
@@ -152,6 +129,8 @@ export default function ComparisonReport({
 
       <HowToReadCard />
 
+      <CurveAnatomy stats={stats} tierLabel={tierLabel} currentThreshold={currentThreshold} />
+
       <VerdictCard
         rankedOptions={rankedOptions}
         currentFacts={currentFacts}
@@ -172,8 +151,6 @@ export default function ComparisonReport({
       <OrderImpactTable options={options} />
 
       <TierMixChart options={options} currentFacts={currentFacts} />
-
-      <AovDistribution grossValues={grossValues} markers={markers} />
 
       {curves.length > 0 && (
         <ThresholdSensitivityChart

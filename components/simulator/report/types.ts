@@ -35,6 +35,13 @@ export const OPTION_COLORS: Record<OptionKey, string> = {
 
 export const NEUTRAL_COLOR = "#A0AEB8";
 
+/** A labelled reference line on a value axis (sensitivity-chart option markers). */
+export interface ThresholdMarker {
+  value: number;
+  label: string;
+  color: string;
+}
+
 /** Tier-series hues for the volume-mix chart — readable on dark, distinct from OPTION_COLORS. */
 export const TIER_COLORS: Record<CanonicalTier, string> = {
   standard: "#5EEAD4",

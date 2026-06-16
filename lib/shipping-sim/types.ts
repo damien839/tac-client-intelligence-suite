@@ -115,6 +115,44 @@ export interface Analysis {
   netDeltaPerOrder: number;
 }
 
+export interface CurvePercentiles {
+  p10: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p90: number;
+  p95: number;
+  p99: number;
+}
+
+/** Descriptive anatomy of the order-value curve under the current scheme. */
+export interface CurveStats {
+  count: number;
+  mean: number;
+  median: number;
+  stdev: number;
+  min: number;
+  max: number;
+  percentiles: CurvePercentiles;
+  skewPct: number; // mean/median - 1, as a percentage (0 when median is 0)
+  /** $25 bands; the final band is open-ended (hi === null). */
+  histogram: { lo: number; hi: number | null; n: number }[];
+  /** Most common exact subtotals (rounded to the cent), count-desc, capped at 12. */
+  pricePoints: { value: number; n: number }[];
+  /**
+   * $5 bands spanning the dominant tier's current free-ship line ±$50, for the
+   * threshold-pull visual. Null when the dominant tier is flat (no threshold to build to).
+   */
+  pullZone: { threshold: number; bands: { lo: number; n: number }[] } | null;
+  /** Dominant tier's current fee as a % of band midpoint; bands at/above a free line read 0%. */
+  shippingLoad: { lo: number; hi: number; loadPct: number; n: number }[];
+  freeAov: number; // AOV of orders that ship free under the current scheme
+  paidAov: number; // AOV of orders that pay shipping under the current scheme
+  freeN: number;
+  paidN: number;
+  shipRevPctGmv: number; // Σ current fee / Σ gross (0 when GMV is 0)
+}
+
 /** Tunable behavioural assumptions driving the recommendation engine. */
 export interface BehaviorParams {
   cogsPercent: number; // 0..1 — required to value product-margin effects
