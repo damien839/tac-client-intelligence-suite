@@ -18,6 +18,28 @@ describe("parseShippingOrders", () => {
     expect(r.services).toEqual(["Express", "Standard"]); // sorted, distinct
   });
 
+  it("prefers Subtotal over Total for gross (threshold applies to merchandise, not subtotal+shipping)", () => {
+    // Shopify UK/EU shape: Total = Subtotal + Shipping. Gross must be the Subtotal.
+    const csv = [
+      "Name,Subtotal,Shipping,Total,Shipping Method",
+      "#1,128.95,30.59,159.54,Express",
+      "#2,455.79,0,455.79,Free",
+    ].join("\n");
+    const r = parseShippingOrders(csv);
+    expect(r.errors).toEqual([]);
+    expect(r.orders[0].gross).toBe(128.95);
+    expect(r.orders[1].gross).toBe(455.79);
+    // Subtotal is not a total-type column, so no shipping-bundling warning.
+    expect(r.warnings.some((w) => w.includes("includes shipping"))).toBe(false);
+  });
+
+  it("warns when it falls back to a Total column alongside a Shipping column", () => {
+    const csv = ["Total,Shipping,Shipping Method", "159.54,30.59,Express"].join("\n");
+    const r = parseShippingOrders(csv);
+    expect(r.orders[0].gross).toBe(159.54); // best available
+    expect(r.warnings.some((w) => w.includes("includes shipping"))).toBe(true);
+  });
+
   it("errors when a required column is missing", () => {
     const csv = ["Total,Shipping", "120,0"].join("\n");
     const r = parseShippingOrders(csv);

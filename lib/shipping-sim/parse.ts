@@ -1,7 +1,13 @@
 import Papa from "papaparse";
 import { OrderRow, UnitStats } from "./types";
 
-const GROSS_COLS = ["total", "total price", "total_price", "gross sales", "gross", "subtotal"];
+// Gross = the merchandise cart value the free-ship threshold applies to (pre-shipping).
+// Prefer subtotal/gross-sales; fall back to total-type columns only when nothing better
+// exists. A "Total" that bundles shipping would otherwise shift the whole curve up and
+// mis-classify orders around the threshold (the reconciliation gate can sit under 10% and
+// miss it — see the UK/EU export, 2026-06-17).
+const GROSS_COLS = ["subtotal", "gross sales", "gross", "total price", "total_price", "total"];
+const TOTAL_LIKE_COLS = ["total", "total price", "total_price"];
 const SHIPPING_COLS = ["shipping", "shipping paid", "shipping price", "shipping amount", "shipping_amount"];
 const SERVICE_COLS = ["shipping method", "shipping_method", "service", "carrier", "shipping line", "delivery method"];
 const NAME_COL = "name";
@@ -220,6 +226,15 @@ export function parseShippingOrders(csvText: string): ParseResult {
   if (!shipCol) errors.push('Missing required column: shipping paid (e.g. "Shipping")');
   if (!svcCol) errors.push('Missing required column: service at checkout (e.g. "Shipping Method")');
   if (errors.length > 0) return { orders: [], services: [], errors, warnings, unitStats: null };
+
+  // Fell back to a total-type column while a shipping column exists: the order value may
+  // include shipping, which distorts AOV and the free-ship threshold comparison.
+  if (grossCol && shipCol && TOTAL_LIKE_COLS.includes(grossCol)) {
+    warnings.push(
+      `Using "${grossCol}" as the order value — if it includes shipping, AOV and the free-ship ` +
+        `threshold may be off. Provide a "Subtotal" column for accuracy.`
+    );
+  }
 
   // Detect full-export mode: headers include name + lineitem quantity + lineitem price
   const headers = Object.keys(rows[0]);
