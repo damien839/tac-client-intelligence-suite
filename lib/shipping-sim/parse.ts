@@ -86,6 +86,7 @@ function parseFullExport(
   const orders: OrderRow[] = [];
   const serviceSet = new Set<string>();
   let skippedOrders = 0;
+  let skippedZeroGross = 0;
   let hadUnparseableQty = false;
 
   // Per-order unit data for stats
@@ -111,6 +112,14 @@ function parseFullExport(
 
     if (Number.isNaN(gross)) {
       skippedOrders += 1;
+      continue;
+    }
+
+    // A $0 (or negative) cart is not a real merchandise order — shipping-only
+    // charges, fully-comped/exchange orders. They distort AOV, the threshold split
+    // and the curve, so exclude them from the analysis entirely.
+    if (gross <= 0) {
+      skippedZeroGross += 1;
       continue;
     }
 
@@ -149,6 +158,12 @@ function parseFullExport(
   if (skippedOrders > 0) {
     warnings.push(
       `${skippedOrders} order(s) skipped — no parseable gross sale value`,
+    );
+  }
+
+  if (skippedZeroGross > 0) {
+    warnings.push(
+      `${skippedZeroGross} order(s) excluded — $0 or negative cart value (not real merchandise orders)`,
     );
   }
 
@@ -254,10 +269,11 @@ export function parseShippingOrders(csvText: string): ParseResult {
     };
   }
 
-  // Summary mode — original behaviour, byte-identical to before
+  // Summary mode.
   const orders: OrderRow[] = [];
   const serviceSet = new Set<string>();
   let skipped = 0;
+  let skippedZeroGross = 0;
 
   for (const row of rows) {
     const gross = toNumber(row[grossCol!]);
@@ -265,6 +281,12 @@ export function parseShippingOrders(csvText: string): ParseResult {
     const rawService = (row[svcCol!] ?? "").trim() || "Unknown";
     if (Number.isNaN(gross)) {
       skipped += 1;
+      continue;
+    }
+    // $0 / negative cart = shipping-only, comped, or junk order — not real merchandise.
+    // Excluded so it doesn't distort AOV, the threshold split, or the curve.
+    if (gross <= 0) {
+      skippedZeroGross += 1;
       continue;
     }
     orders.push({
@@ -277,6 +299,12 @@ export function parseShippingOrders(csvText: string): ParseResult {
 
   if (skipped > 0) {
     warnings.push(`${skipped} row(s) skipped — unreadable gross sale value`);
+  }
+
+  if (skippedZeroGross > 0) {
+    warnings.push(
+      `${skippedZeroGross} order(s) excluded — $0 or negative cart value (not real merchandise orders)`,
+    );
   }
 
   return {

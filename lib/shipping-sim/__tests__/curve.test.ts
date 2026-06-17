@@ -132,9 +132,9 @@ describe("curveStats — shipping load + free/paid split", () => {
   it("reads 0% load for bands at/above the free line, positive below", () => {
     const orders = [o(100), o(275)];
     const s = curveStats(orders, overThreshold, "express");
-    const below = s.shippingLoad.find((b) => b.lo === 100)!; // mid 125 < 250 → pays
-    const above = s.shippingLoad.find((b) => b.lo === 250)!; // mid 275 ≥ 250 → free
-    expect(below.loadPct).toBeCloseTo((30 / 125) * 100, 6);
+    const below = s.shippingLoad.find((b) => b.lo === 100)!; // $100 < 250 → pays $30
+    const above = s.shippingLoad.find((b) => b.lo === 275)!; // $275 ≥ 250 → free
+    expect(below.loadPct).toBeCloseTo((30 / 100) * 100, 6); // weighted on actual gross
     expect(above.loadPct).toBe(0);
   });
 

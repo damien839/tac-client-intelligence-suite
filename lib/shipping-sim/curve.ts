@@ -10,7 +10,7 @@ import {
 const HIST_BAND = 25; // $ width of a histogram band (deep-dive parity, fixed)
 const PULL_BAND = 5; // $ width of a threshold-pull band
 const PULL_SPAN = 50; // $ each side of the current line the pull zone covers
-const LOAD_BAND = 50; // $ width of a shipping-load band
+const LOAD_BAND = 25; // $ width of a shipping-load band
 const LOAD_MAX = 400; // ceiling for the load chart (above this, load is negligible)
 const PRICE_POINT_CAP = 12;
 
@@ -106,8 +106,10 @@ function pullZone(
 }
 
 /**
- * Dominant tier's current fee as a % of band midpoint. A band whose midpoint sits
- * at/above that tier's free line reads 0% (those orders already ship free).
+ * Dominant tier's shipping load by band: Σ(fee) / Σ(gross) over the actual orders in
+ * each band, so sparse low bands reflect their real order values rather than the band
+ * midpoint. Orders at/above that tier's free line contribute $0 fee, so bands above the
+ * threshold read 0%.
  */
 function shippingLoad(
   grossValues: number[],
@@ -120,11 +122,11 @@ function shippingLoad(
   const out: CurveStats["shippingLoad"] = [];
   for (let lo = 0; lo < LOAD_MAX; lo += LOAD_BAND) {
     const hi = lo + LOAD_BAND;
-    const n = grossValues.filter((g) => g >= lo && g < hi).length;
-    if (n === 0) continue;
-    const mid = lo + LOAD_BAND / 2;
-    const fee = tierCost(config, mid);
-    out.push({ lo, hi, loadPct: mid > 0 ? (fee / mid) * 100 : 0, n });
+    const inBand = grossValues.filter((g) => g >= lo && g < hi);
+    if (inBand.length === 0) continue;
+    const grossSum = inBand.reduce((s, g) => s + g, 0);
+    const feeSum = inBand.reduce((s, g) => s + tierCost(config, g), 0);
+    out.push({ lo, hi, loadPct: grossSum > 0 ? (feeSum / grossSum) * 100 : 0, n: inBand.length });
   }
   return out;
 }

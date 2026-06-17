@@ -31,9 +31,10 @@ export default function PullZoneChart({ pullZone }: PullZoneChartProps) {
         Does the ${threshold} line already bend behaviour?
       </h3>
       <p className="text-sm text-tac-muted mb-4">
-        Orders in $5 bands across your current free-ship line. A run-up just below and a spike just
-        above is customers topping up to qualify — the empirical basis for the basket-building
-        assumption, not a guess.
+        Orders in $5 bands across your current free-ship line. A run-up just below and a cluster just
+        above is consistent with customers topping up to qualify — a signal the line already moves
+        baskets, which the basket-building assumption then sizes (the assumption, not this chart,
+        sets how many build).
       </p>
       <ResponsiveContainer width="100%" height={260}>
         <BarChart data={data} margin={{ top: 16, right: 8, bottom: 4, left: 8 }}>

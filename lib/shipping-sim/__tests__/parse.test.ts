@@ -40,6 +40,19 @@ describe("parseShippingOrders", () => {
     expect(r.warnings.some((w) => w.includes("includes shipping"))).toBe(true);
   });
 
+  it("excludes $0 / negative cart orders (shipping-only, comped) and warns", () => {
+    const csv = [
+      "Subtotal,Shipping,Shipping Method",
+      "0,30.59,Express", // shipping-only — not a merchandise order
+      "128.95,30.59,Express",
+      "-5,0,Express", // negative — junk
+    ].join("\n");
+    const r = parseShippingOrders(csv);
+    expect(r.orders).toHaveLength(1);
+    expect(r.orders[0].gross).toBe(128.95);
+    expect(r.warnings.some((w) => w.includes("$0 or negative cart value"))).toBe(true);
+  });
+
   it("errors when a required column is missing", () => {
     const csv = ["Total,Shipping", "120,0"].join("\n");
     const r = parseShippingOrders(csv);

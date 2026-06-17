@@ -37,7 +37,10 @@ export default function ShippingLoadChart({ stats, tierLabel }: ShippingLoadChar
           <YAxis tick={AXIS_TICK} tickFormatter={(v) => `${v}%`} />
           <Tooltip
             contentStyle={TOOLTIP_STYLE}
-            formatter={(v) => [`${v}% of order value`, "Shipping load"]}
+            formatter={(v, _name, item) => [
+              `${v}% of order value · ${item?.payload?.n ?? 0} orders`,
+              "Shipping load",
+            ]}
           />
           <Line type="monotone" dataKey="loadPct" stroke="#C4604F" strokeWidth={2} dot={{ r: 2 }} />
         </LineChart>
