@@ -11,7 +11,7 @@ import {
 } from "recharts";
 import { CurveStats } from "@/lib/shipping-sim/types";
 import { formatCurrency } from "@/lib/calculations";
-import { AXIS_TICK, GRID_STROKE, OPTION_COLORS, TOOLTIP_STYLE } from "./types";
+import { AXIS_TICK, GRID_STROKE, ACCENT_COLOR, TOOLTIP_STYLE } from "./types";
 
 interface PricePointBarsProps {
   stats: CurveStats;
@@ -26,8 +26,8 @@ export default function PricePointBars({ stats }: PricePointBarsProps) {
     <div className="card">
       <h3 className="text-lg font-semibold mb-1 text-tac-accent">Where orders pile up — price points</h3>
       <p className="text-sm text-tac-muted mb-4">
-        The most common exact subtotals. Orders stacking on single-item prices is the signature of a
-        one-item basket — the growth lever is moving people from one item to two.
+        The most common exact subtotals. Orders stacking on single-item prices tell you the book
+        is dominated by single-unit carts, which shapes where a free-ship line can sit.
       </p>
       <ResponsiveContainer width="100%" height={Math.max(200, data.length * 26)}>
         <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 8 }}>
@@ -39,7 +39,7 @@ export default function PricePointBars({ stats }: PricePointBarsProps) {
             formatter={(v) => [`${v} orders`, "At this exact value"]}
             cursor={{ fill: "rgba(160, 174, 184, 0.08)" }}
           />
-          <Bar dataKey="n" fill={OPTION_COLORS["net-profit"]} radius={[0, 2, 2, 0]} />
+          <Bar dataKey="n" fill={ACCENT_COLOR} radius={[0, 2, 2, 0]} />
         </BarChart>
       </ResponsiveContainer>
       <p className="text-xs text-tac-muted mt-2 border-l-2 border-l-tac-accent pl-3">

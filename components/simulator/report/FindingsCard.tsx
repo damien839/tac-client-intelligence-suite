@@ -1,91 +1,81 @@
 "use client";
 
 import { SchemeEvaluation } from "@/lib/shipping-sim/types";
-import { formatCurrency, formatNumber } from "@/lib/calculations";
+import { formatCurrency, formatNumber, formatPercent } from "@/lib/calculations";
 import {
   describeChangedTiers,
   freightShiftSentence,
   recoveryMoveSentence,
   signedCurrency,
 } from "../analysis/format";
-import { ReportOption } from "./types";
+import { MECHANICAL_CAVEAT, ReportOption } from "./types";
 
 interface FindingsCardProps {
-  rankedOptions: ReportOption[];
+  /** Candidates that differ from Current, in grid order (net shipping P&L Δ, desc). */
+  movedOptions: ReportOption[];
   currentFacts: SchemeEvaluation;
   monthlyOrders: number | undefined;
-  assumptionEcho: string;
 }
 
-/** Largest positive contribution component for the winner, named with its value. */
-function moneySource(evaluation: SchemeEvaluation, currentFacts: SchemeEvaluation): string {
-  const components: { label: string; value: number }[] = [
-    { label: "extra shipping fee revenue", value: evaluation.shippingRevenue - currentFacts.shippingRevenue },
-    { label: "carrier savings", value: currentFacts.carrierSpend - evaluation.carrierSpend },
-    { label: "basket-building product margin", value: evaluation.upliftMarginGain },
-  ];
-  const positive = components.filter((c) => c.value > 0).sort((a, b) => b.value - a.value);
-  if (positive.length === 0) return "No component is positive — this option simply loses less than the alternatives.";
-  const parts = positive.map((c) => `${c.label} (${signedCurrency(c.value)})`);
-  const drag = evaluation.abandonMarginLoss > 0
-    ? `, partly offset by ${formatCurrency(evaluation.abandonMarginLoss)} of margin lost to abandonment`
-    : "";
-  return `The money comes from ${parts.join(" and ")}${drag}.`;
+/**
+ * Which of the two mechanical levers carries the row's net change.
+ *
+ * Whether orders switched service is read from the switch COUNT, never from the
+ * carrier delta: tiers with equal avgCost, or switches that cancel out, move orders
+ * between services at a carrier delta of exactly $0. Inferring "nothing switched"
+ * from a $0 delta contradicts the switch count printed in the order-impact table.
+ */
+function driverSentence(evaluation: SchemeEvaluation): string {
+  const fee = evaluation.shippingRevenueDelta;
+  const carrier = -evaluation.carrierSpendDelta;
+  const switched = evaluation.impact.switchedTier;
+
+  if (switched === 0) {
+    return `All of the change is fee revenue (${signedCurrency(fee)}); every order ships on the service it does today, so the carrier bill is unchanged.`;
+  }
+  const orderWord = switched === 1 ? "order lands" : "orders land";
+  if (Math.abs(carrier) < 0.005) {
+    return `${switched} ${orderWord} on a different service, but those services cost the same to ship — so the carrier bill is unchanged and all of the change is fee revenue (${signedCurrency(fee)}).`;
+  }
+  const leadFee = Math.abs(fee) >= Math.abs(carrier);
+  return `The change splits into ${signedCurrency(fee)} of fee revenue and ${signedCurrency(carrier)} of carrier cost — ${leadFee ? "fee revenue" : "the carrier bill"} carries it, because ${switched} ${orderWord} on a different service.`;
 }
 
 export default function FindingsCard({
-  rankedOptions,
+  movedOptions,
   currentFacts,
   monthlyOrders,
-  assumptionEcho,
 }: FindingsCardProps) {
-  const winner = rankedOptions[0];
+  const top = movedOptions[0];
 
   const findings: string[] = [];
-  if (winner) {
-    const w = winner.evaluation;
+  if (top) {
+    const e = top.evaluation;
     findings.push(
-      `${winner.label} (${describeChangedTiers(winner.scheme, winner.changedTiers)}) ranks first: ${signedCurrency(w.contributionDelta)} expected total contribution vs current across ${w.orderCount} orders.`
+      `${top.label} (${describeChangedTiers(top.scheme, top.changedTiers)}) shows the largest net shipping P&L change: ${signedCurrency(e.netShippingProfitDelta)} across ${e.orderCount} orders.`
     );
-    findings.push(moneySource(w, currentFacts));
-    const netProfitOption = rankedOptions.find((option) => option.key === "net-profit");
-    if (netProfitOption) {
-      const shift = freightShiftSentence(netProfitOption.evaluation, currentFacts);
-      if (shift) {
-        findings.push(`Freight shift (${netProfitOption.label}): ${shift}`);
-      }
-      // The option's objective is a neutral shipping P&L — state the recovery move
-      // alongside the contribution figures whenever it gets closer to 100%.
-      const recoveryMove = recoveryMoveSentence(netProfitOption.evaluation, currentFacts);
-      if (recoveryMove) {
-        findings.push(`Cost recovery (${netProfitOption.label}): ${recoveryMove}`);
-      }
-    }
-    const basketOption = rankedOptions.find((option) => option.basketNarrative !== undefined);
-    if (basketOption?.basketNarrative) {
-      findings.push(`${basketOption.label}: ${basketOption.basketNarrative}`);
-    }
-    const newlyPayingClause =
-      w.impact.newlyPaying >= 0.05
-        ? `, and ${w.impact.newlyPaying.toFixed(1)} orders that ship free today would start paying shipping`
-        : "";
+    findings.push(driverSentence(e));
+    const recoveryMove = recoveryMoveSentence(e, currentFacts);
     findings.push(
-      `Risk: ${w.expectedOrdersLost.toFixed(1)} orders expected lost to abandonment${newlyPayingClause}.`
+      recoveryMove ??
+        `Cost recovery moves ${formatPercent(currentFacts.recoveryRate, 1)} → ${formatPercent(e.recoveryRate, 1)}.`
     );
-    if (monthlyOrders !== undefined && w.orderCount > 0) {
-      const perOrder = w.contributionDelta / w.orderCount;
+    const freightShift = freightShiftSentence(e, currentFacts);
+    if (freightShift) findings.push(`Freight shift: ${freightShift}`);
+    if (e.impact.newlyPaying > 0 || e.impact.newlyFree > 0) {
+      findings.push(
+        `Who changes: ${e.impact.newlyPaying} orders that ship free today start paying a fee; ${e.impact.newlyFree} orders that pay today start shipping free.`
+      );
+    }
+    if (monthlyOrders !== undefined && e.orderCount > 0) {
+      const perOrder = e.netShippingProfitDelta / e.orderCount;
       findings.push(
         `At ${formatNumber(monthlyOrders)} orders/month that scales to ≈ ${formatCurrency(perOrder * monthlyOrders, 0)}/month · ${formatCurrency(perOrder * monthlyOrders * 12, 0)}/year (illustrative — assumes the sample mix is representative).`
       );
     }
-    if (winner.unconstrained) {
-      findings.push(
-        "Caveat: abandonment is set to 0%, so this optimum is unconstrained — nothing in the model punishes charging everyone more. Set an abandonment rate before acting on it."
-      );
-    }
   } else {
     findings.push(
-      "No option differs from the current scheme yet — recommendations need uploaded orders that map to a service in the current scheme; adjust the Competitor benchmark scheme to compare one here."
+      "Every candidate evaluates to the current scheme — there is nothing to compare yet. Adjust the Competitor benchmark scheme to bring a different scheme into the grid."
     );
   }
 
@@ -102,7 +92,7 @@ export default function FindingsCard({
           </li>
         ))}
       </ul>
-      <p className="text-xs text-tac-muted mt-4">{assumptionEcho}</p>
+      <p className="text-xs text-tac-warning mt-4">{MECHANICAL_CAVEAT}</p>
     </div>
   );
 }

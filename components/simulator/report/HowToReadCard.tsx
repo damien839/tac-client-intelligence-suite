@@ -9,15 +9,15 @@
 const NOTES: { heading: string; body: string }[] = [
   {
     heading: "These figures re-price the orders you already get",
-    body: "The model runs on your uploaded order history. It does not model new customers a different shipping offer might win, or existing ones it might lose. Read every figure as the effect on your current book — not a growth or revenue forecast.",
+    body: "Every candidate is your uploaded order history run through a different scheme — same orders, same cart values, same volume. It does not model new customers a different shipping offer might win, or existing ones it might lose. Read every figure as the effect on your current book, not a growth or revenue forecast.",
   },
   {
-    heading: "Every dollar scales with the assumptions",
-    body: "The basket-build rate, abandonment rate and COGS are estimates set in the panel, not values measured from this store. The projected contribution moves with them. Adjust the sliders to see how sensitive the result is before acting on a number.",
+    heading: "Only two things can move",
+    body: "Fee revenue moves when a different share of orders sits above or below the free-shipping line. Carrier cost moves only when an order lands on a different service tier under the new scheme — the same order on the same service always costs the same to ship.",
   },
   {
-    heading: "Cost recovery means break-even, not maximum profit",
-    body: "The Cost-recovery optimiser targets shipping revenue ≈ carrier cost. A scheme that earns more overall but over-charges for freight ranks below a break-even one. It answers “stop subsidising or over-charging shipping”, not “make the most money”.",
+    heading: "The grid is a comparison, not a recommendation",
+    body: "Rows are ordered by net shipping P&L so the spread is easy to read. Nothing here searches for a “best” scheme: with customer behaviour held fixed, an unconstrained profit search always lands on “charge everyone the maximum”, which is not advice.",
   },
 ];
 

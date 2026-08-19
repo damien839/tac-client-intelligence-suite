@@ -2,7 +2,6 @@
 
 import {
   CartesianGrid,
-  Legend,
   Line,
   LineChart,
   ReferenceLine,
@@ -16,7 +15,7 @@ import { formatCurrency } from "@/lib/calculations";
 import { AXIS_TICK, GRID_STROKE, NEUTRAL_COLOR, ThresholdMarker, TOOLTIP_STYLE } from "./types";
 
 interface ThresholdSensitivityChartProps {
-  curves: ThresholdCurvePoint[];
+  curve: ThresholdCurvePoint[];
   currentThreshold: number | null;
   /** Reference lines for options that move THIS tier's free-over line. */
   markers: ThresholdMarker[];
@@ -25,7 +24,7 @@ interface ThresholdSensitivityChartProps {
 }
 
 export default function ThresholdSensitivityChart({
-  curves,
+  curve,
   currentThreshold,
   markers,
   tierLabel,
@@ -36,14 +35,13 @@ export default function ThresholdSensitivityChart({
         Threshold sensitivity — {tierLabel} free-over line
       </h3>
       <p className="text-sm text-tac-muted mb-4">
-        How the outcome changes as the {tierLabel} free-over threshold moves (fee held at
-        current). The gap between the lines is the basket-building effect; steep regions are
-        where the threshold decision matters. This isolates one lever — the Cost-recovery
-        optimiser may move several at once (fees and the other service&apos;s line), which this
-        curve can&apos;t show.
+        How net shipping P&amp;L changes as the {tierLabel} free-over threshold moves, with the
+        fee held at its current value. Steep regions are where the threshold decision matters.
+        This isolates one lever — a candidate that also changes fees or another service&apos;s
+        line will not sit exactly on this curve.
       </p>
       <ResponsiveContainer width="100%" height={280}>
-        <LineChart data={curves} margin={{ top: 16, right: 16, bottom: 4, left: 8 }}>
+        <LineChart data={curve} margin={{ top: 16, right: 16, bottom: 4, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
           <XAxis
             dataKey="threshold"
@@ -58,7 +56,6 @@ export default function ThresholdSensitivityChart({
             formatter={(v, name) => [formatCurrency(Number(v)), String(name)]}
             labelFormatter={(l) => `Free over $${l}`}
           />
-          <Legend wrapperStyle={{ fontSize: 12 }} />
           {currentThreshold !== null && (
             <ReferenceLine
               x={currentThreshold}
@@ -84,19 +81,10 @@ export default function ThresholdSensitivityChart({
           <ReferenceLine y={0} stroke={GRID_STROKE} />
           <Line
             type="monotone"
-            dataKey="contributionNoUplift"
-            name="Without basket-building"
-            stroke="#6088aa"
+            dataKey="netShippingProfitDelta"
+            name="Δ net shipping P&L"
+            stroke="#F5B36B"
             strokeWidth={2}
-            dot={false}
-          />
-          <Line
-            type="monotone"
-            dataKey="contributionWithUplift"
-            name="With basket-building"
-            stroke="#4ADE80"
-            strokeWidth={2}
-            strokeDasharray="6 3"
             dot={false}
           />
         </LineChart>

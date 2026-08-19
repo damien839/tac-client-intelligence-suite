@@ -1,39 +1,39 @@
-import { CanonicalTier, RecommendationId, Scheme, SchemeEvaluation } from "@/lib/shipping-sim/types";
+import { CandidateScheme, CanonicalTier, SchemeEvaluation } from "@/lib/shipping-sim/types";
 
-export type OptionKey = RecommendationId | "custom";
-
-/** One column of the comparative report — a fully evaluated scheme option. */
-export interface ReportOption {
-  key: OptionKey;
-  label: string;
-  shortLabel: string;
+/** One row/column of the comparative report — a candidate scheme plus its evaluation. */
+export interface ReportOption extends CandidateScheme {
+  /** Chart/series colour, assigned by grid position. */
   color: string;
-  /** The option's full candidate scheme — may change multiple tiers. */
-  scheme: Scheme;
-  /** Tiers whose fee or free threshold differ from the current scheme. */
-  changedTiers: CanonicalTier[];
   evaluation: SchemeEvaluation;
-  unconstrained?: boolean;
-  capPinned?: boolean;
-  /** This option's best answer equals the current scheme (changedTiers is empty). */
-  matchesCurrent?: boolean;
-  /** Basket-builder only: plain-English line naming the source cluster + typical unit. */
-  basketNarrative?: string;
 }
 
-export const OPTION_SHORT_LABELS: Record<OptionKey, string> = {
-  "net-profit": "Cost recovery",
-  "basket-builder": "Basket",
-  custom: "Competitor",
-};
+/**
+ * The single honesty caveat the report must carry. Rendered under the comparison
+ * grid and in the findings footer so it survives into the printed PDF.
+ */
+export const MECHANICAL_CAVEAT =
+  "Assumes order volume unchanged — more orders paying a fee is shown as pure gain. The only modelled customer response is switching to a cheaper service when a change makes their current choice irrational; buying more, or not buying at all, is not modelled.";
 
-export const OPTION_COLORS: Record<OptionKey, string> = {
-  "net-profit": "#F5B36B",
-  "basket-builder": "#4ADE80",
-  custom: "#C084FC",
-};
+/** Series hues for candidate rows, assigned by grid position. Readable on dark. */
+export const OPTION_PALETTE = [
+  "#A0AEB8", // Current — deliberately neutral
+  "#F5B36B",
+  "#4ADE80",
+  "#C084FC",
+  "#5EEAD4",
+  "#F472B6",
+  "#FACC15",
+  "#818CF8",
+] as const;
+
+export function optionColor(index: number): string {
+  return OPTION_PALETTE[index % OPTION_PALETTE.length];
+}
 
 export const NEUTRAL_COLOR = "#A0AEB8";
+
+/** TAC accent — the single-series highlight used by the curve-anatomy charts. */
+export const ACCENT_COLOR = "#F5B36B";
 
 /** A labelled reference line on a value axis (sensitivity-chart option markers). */
 export interface ThresholdMarker {
@@ -42,7 +42,7 @@ export interface ThresholdMarker {
   color: string;
 }
 
-/** Tier-series hues for the volume-mix chart — readable on dark, distinct from OPTION_COLORS. */
+/** Tier-series hues for the volume-mix chart — readable on dark, distinct from OPTION_PALETTE. */
 export const TIER_COLORS: Record<CanonicalTier, string> = {
   standard: "#5EEAD4",
   express: "#F472B6",
