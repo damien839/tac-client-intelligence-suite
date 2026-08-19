@@ -50,7 +50,7 @@ export default function ContributionDecomposition({
         stack nets to the option&apos;s Δ total contribution in the table.
       </p>
       <ResponsiveContainer width="100%" height={280}>
-        <BarChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 8 }}>
+        <BarChart data={data} stackOffset="sign" margin={{ top: 8, right: 16, bottom: 4, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
           <XAxis dataKey="name" tick={AXIS_TICK} />
           <YAxis tick={AXIS_TICK} tickFormatter={(v) => formatCurrency(Number(v), 0)} />
