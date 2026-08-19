@@ -1,12 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   bucketOrders,
-  dominantPaidTier,
+  dominantTier,
   mechanicalScenario,
   prepareBuckets,
   thresholdCandidates,
 } from "@/lib/shipping-sim/scenario";
-import { proposedScenario } from "@/lib/shipping-sim/model";
 import { CanonicalTier, Scheme, TaggedOrder } from "@/lib/shipping-sim/types";
 
 function o(gross: number, tier: CanonicalTier = "standard"): TaggedOrder {
@@ -23,20 +22,25 @@ function run(orders: TaggedOrder[], candidate: Scheme, scheme: Scheme = current)
 }
 
 describe("mechanicalScenario", () => {
-  it("matches proposedScenario exactly — it is the same revealed-preference model", () => {
+  it("prices every order by hand-checkable revealed preference", () => {
+    // Current: std $10 free>=100 (cost 7), exp $20 flat (cost 15).
+    // Candidate: std $12 free>=200, exp $25 flat.
+    //   $50  std  -> premium 0; stay std ($12) vs cheapest std ($12) -> std, pays 12
+    //   $90  std  -> premium 0; std, pays 12
+    //   $150 std  -> premium 0; std, pays 12 (candidate free line moved to 200)
+    //   $120 exp  -> premium 20-0 = 20; stay exp costs 25 - cheapest 12 = 13 <= 20 -> exp, pays 25
+    //   $60  exp  -> premium 20-10 = 10; stay exp 25 - 12 = 13 > 10 -> switches to std, pays 12
     const orders = [o(50), o(90), o(150), o(120, "express"), o(60, "express")];
     const candidate: Scheme = {
       standard: { tier: "standard", fee: 12, freeThreshold: 200, avgCost: 7 },
       express: { tier: "express", fee: 25, freeThreshold: null, avgCost: 15 },
     };
-    const mechanical = run(orders, candidate);
-    const reference = proposedScenario(orders, current, candidate);
-    expect(mechanical.shippingRevenue).toBeCloseTo(reference.shippingRevenue);
-    expect(mechanical.carrierSpend).toBeCloseTo(reference.carrierSpend);
-    expect(mechanical.netShippingProfit).toBeCloseTo(reference.netShippingProfit);
-    for (const tier of ["standard", "express", "nextday", "sameday"] as CanonicalTier[]) {
-      expect(mechanical.volumeByTier[tier]).toBe(reference.ordersByTier[tier]);
-    }
+    const result = run(orders, candidate);
+    expect(result.shippingRevenue).toBeCloseTo(12 + 12 + 12 + 25 + 12);
+    expect(result.carrierSpend).toBeCloseTo(7 * 4 + 15);
+    expect(result.volumeByTier.standard).toBe(4);
+    expect(result.volumeByTier.express).toBe(1);
+    expect(result.impact.switchedTier).toBe(1);
   });
 
   it("evaluating the current scheme against itself is a strict no-op", () => {
@@ -131,32 +135,57 @@ describe("bucketOrders", () => {
     expect(buckets.find((b) => b.tier === "express" && b.gross === 50)!.count).toBe(1);
   });
 
-  it("rounds gross to the dollar when distinct buckets exceed the cap, preserving total count", () => {
-    const orders = Array.from({ length: 5001 }, (_, i) => o(100 + i / 1000));
+  // REGRESSION (challenge #3): bucketing used to round gross to the dollar above
+  // 5000 distinct pairs, which pushed $249.60 over a $250 free line — the same
+  // order priced differently depending on how big the upload happened to be.
+  it("never rounds gross, however many distinct values the book has", () => {
+    const orders = Array.from({ length: 5004 }, (_, i) => o(100 + i / 1000));
     const buckets = bucketOrders(orders);
-    expect(buckets.length).toBeLessThanOrEqual(5001);
-    expect(buckets.reduce((sum, b) => sum + b.count, 0)).toBe(5001);
+    expect(buckets).toHaveLength(5004); // exact, not collapsed
+    expect(buckets.reduce((sum, b) => sum + b.count, 0)).toBe(5004);
+    expect(buckets.every((b) => Number.isInteger(b.gross))).toBe(false);
+  });
+
+  it("prices sub-dollar values against the free line identically at any book size", () => {
+    const near: Scheme = { standard: { tier: "standard", fee: 10, freeThreshold: 250, avgCost: 6 } };
+    const justUnder = [o(249.6), o(249.7), o(249.9)];
+    const small = run(justUnder, near, near);
+    const big = run(
+      [...justUnder, ...Array.from({ length: 5001 }, (_, i) => o(1 + i * 0.017))],
+      near,
+      near
+    );
+    expect(small.freeOrderShare).toBe(0); // none of the three clears $250
+    expect(big.freeOrderShare * big.orderCount).toBe(0);
+    expect(big.shippingRevenue).toBeCloseTo(5004 * 10);
   });
 });
 
-describe("dominantPaidTier", () => {
-  it("picks the tier with the most paying orders", () => {
+describe("dominantTier", () => {
+  it("picks the tier carrying the most orders", () => {
     const orders = [o(50), o(60), o(150, "express"), o(50, "express")];
-    expect(dominantPaidTier(orders, current)).toBe("standard");
+    expect(dominantTier(orders, current)).toBe("standard");
   });
 
-  it("falls back to total volume when nobody pays, then canonical order", () => {
-    const allFree: Scheme = {
-      standard: { tier: "standard", fee: 0, freeThreshold: null, avgCost: 7 },
-      express: { tier: "express", fee: 0, freeThreshold: null, avgCost: 15 },
-    };
-    const orders = [o(50, "express"), o(60, "express"), o(50)];
-    expect(dominantPaidTier(orders, allFree)).toBe("express");
+  // REGRESSION (challenge #6): ranking by PAID count sent the grid at a 10-order
+  // Express tier and never explored the free line on the 80-order Standard tier.
+  it("prefers the high-volume mostly-free tier over a small all-paying tier", () => {
+    const orders = [
+      ...Array.from({ length: 80 }, () => o(200)), // standard, all free (>= $100)
+      ...Array.from({ length: 10 }, () => o(50, "express")), // express, all paying
+    ];
+    expect(dominantTier(orders, current)).toBe("standard");
+  });
+
+  it("breaks a volume tie on paid count", () => {
+    const orders = [o(200), o(210), o(50, "express"), o(60, "express")];
+    // 2 standard (both free) vs 2 express (both paying) -> express wins on paid count
+    expect(dominantTier(orders, current)).toBe("express");
   });
 
   it("returns null without analysable orders", () => {
-    expect(dominantPaidTier([], current)).toBeNull();
-    expect(dominantPaidTier([o(50, "nextday")], current)).toBeNull();
+    expect(dominantTier([], current)).toBeNull();
+    expect(dominantTier([o(50, "nextday")], current)).toBeNull();
   });
 });
 

@@ -2,10 +2,17 @@ import { describe, it, expect } from "vitest";
 import {
   buildCandidates,
   CANDIDATE_ROUNDING,
+  CANDIDATE_ROUNDING_LOW_AOV,
+  candidateRoundingFor,
   evaluateCandidates,
   percentileThresholds,
 } from "@/lib/shipping-sim/candidates";
-import { changedTiersOf, evaluateScheme, thresholdCurve } from "@/lib/shipping-sim/evaluate";
+import {
+  changedTiersOf,
+  evaluateScheme,
+  isCurrentSchemeEntered,
+  thresholdCurve,
+} from "@/lib/shipping-sim/evaluate";
 import { CanonicalTier, Scheme, TaggedOrder } from "@/lib/shipping-sim/types";
 
 function o(gross: number, tier: CanonicalTier = "standard"): TaggedOrder {
@@ -37,10 +44,26 @@ describe("percentileThresholds", () => {
     expect(percentileThresholds(orders)).toEqual([125, 200, 300]);
   });
 
-  it("dedupes and drops zero, and handles an empty book", () => {
+  it("dedupes and handles an empty book", () => {
     expect(percentileThresholds(Array.from({ length: 10 }, () => o(200)))).toEqual([200]);
-    expect(percentileThresholds([o(5), o(6), o(7)])).toEqual([]); // all round to $0
     expect(percentileThresholds([])).toEqual([]);
+  });
+
+  // REGRESSION (challenge #7a): at a flat $25 step a low-AOV book rounded every
+  // candidate to $0 and the grid collapsed to nothing.
+  it("drops to $5 steps on a low-AOV book instead of rounding every candidate to zero", () => {
+    const cheap = [o(5), o(6), o(7)];
+    expect(candidateRoundingFor(cheap.map((x) => x.gross))).toBe(CANDIDATE_ROUNDING_LOW_AOV);
+    expect(percentileThresholds(cheap)).toEqual([5]);
+
+    const cheapSpread = [o(8), o(14), o(23), o(31), o(42)];
+    expect(percentileThresholds(cheapSpread)).toEqual([15, 25, 30]);
+    expect(percentileThresholds(cheapSpread).every((t) => t > 0)).toBe(true);
+  });
+
+  it("keeps $25 steps once p75 reaches the low-AOV cutoff", () => {
+    const normal = Array.from({ length: 20 }, (_, i) => o((i + 1) * 20)); // p75 = $320
+    expect(candidateRoundingFor(normal.map((x) => x.gross))).toBe(CANDIDATE_ROUNDING);
   });
 });
 
@@ -124,11 +147,15 @@ describe("evaluateCandidates", () => {
     expect(rows.at(-1)!.candidate.id).toBe("all-free");
   });
 
+  it("orders rows without Array.prototype.toSorted (Safari <16.4 has no such method)", () => {
+    const source = "" + evaluateCandidates;
+    expect(source).not.toContain("toSorted");
+  });
+
   it("computes the four grid columns mechanically (hand-verified)", () => {
     // 2 orders below the current $100 line (pay $10), 2 above (free). Cost $7 each.
     const orders = [o(50), o(60), o(150), o(160)];
-    const candidates = buildCandidates(orders, current);
-    const rows = evaluateCandidates(orders, current, candidates);
+    const rows = evaluateCandidates(orders, current, buildCandidates(orders, current));
     const byId = new Map(rows.map((r) => [r.candidate.id, r.evaluation]));
 
     const base = byId.get("current")!;
@@ -144,13 +171,40 @@ describe("evaluateCandidates", () => {
     expect(noFree.recoveryRateCurrent).toBeCloseTo(20 / 28);
     expect(noFree.recoveryRate).toBeCloseTo(40 / 28);
 
-    // Free on everything: revenue 0, cost unchanged.
-    const allFree = byId.get("all-free")!;
-    expect(allFree.shippingRevenueDelta).toBeCloseTo(-20);
-    expect(allFree.carrierSpendDelta).toBeCloseTo(0);
-    expect(allFree.netShippingProfitDelta).toBeCloseTo(-20);
-    expect(allFree.recoveryRate).toBeCloseTo(0);
-    expect(allFree.freeOrderShare).toBeCloseTo(1);
+    // Everything ships free: revenue 0, cost unchanged. On this book the $50
+    // free-over line already frees every order, so it is the surviving row and
+    // "all-free" is dropped as an economic duplicate (challenge #7b).
+    const everythingFree = byId.get("threshold-50")!;
+    expect(byId.has("all-free")).toBe(false);
+    expect(everythingFree.shippingRevenueDelta).toBeCloseTo(-20);
+    expect(everythingFree.carrierSpendDelta).toBeCloseTo(0);
+    expect(everythingFree.netShippingProfitDelta).toBeCloseTo(-20);
+    expect(everythingFree.recoveryRate).toBeCloseTo(0);
+    expect(everythingFree.freeOrderShare).toBeCloseTo(1);
+  });
+
+  // REGRESSION (challenge #7b): distinct schemes can be economically identical —
+  // on a fee-free book every threshold collects $0 — and rendering five rows of
+  // the same numbers reads as five different answers.
+  it("drops rows whose revenue and carrier cost duplicate an earlier row", () => {
+    const freeBook: Scheme = {
+      standard: { tier: "standard", fee: 0, freeThreshold: null, avgCost: 7 },
+    };
+    const orders = Array.from({ length: 20 }, (_, i) => o((i + 1) * 20));
+    const candidates = buildCandidates(orders, freeBook);
+    expect(candidates.length).toBeGreaterThan(1); // several distinct schemes built
+    const rows = evaluateCandidates(orders, freeBook, candidates);
+    // Every one of them collects $0 on $0 fees, so only the baseline survives.
+    expect(rows.map((r) => r.candidate.id)).toEqual(["current"]);
+  });
+
+  it("keeps rows that differ in outcome even by a small amount", () => {
+    const orders = [o(50), o(60), o(150), o(160)];
+    const rows = evaluateCandidates(orders, current, buildCandidates(orders, current));
+    const outcomes = rows.map(
+      (r) => `${r.evaluation.shippingRevenue}|${r.evaluation.carrierSpend}`
+    );
+    expect(new Set(outcomes).size).toBe(outcomes.length);
   });
 
   it("shows a carrier cost delta only when the candidate moves orders between tiers", () => {
@@ -208,12 +262,14 @@ describe("evaluateScheme", () => {
 });
 
 describe("thresholdCurve", () => {
-  it("returns one mechanical point per $10 threshold, zero at the current line", () => {
+  // REGRESSION (challenge #8): the baseline came from a different summation order,
+  // so the point at the current threshold read -1e-10 and the tooltip said "-$0.00".
+  it("returns one mechanical point per $10 threshold, EXACTLY zero at the current line", () => {
     const curve = thresholdCurve(evenBook, current);
     expect(curve.length).toBeGreaterThan(0);
     expect(curve.every((p) => typeof p.netShippingProfitDelta === "number")).toBe(true);
     const atCurrent = curve.find((p) => p.threshold === 100)!;
-    expect(atCurrent.netShippingProfitDelta).toBeCloseTo(0);
+    expect(atCurrent.netShippingProfitDelta).toBe(0);
   });
 
   it("matches evaluateScheme at the same candidate threshold", () => {
@@ -241,5 +297,44 @@ describe("changedTiersOf", () => {
       })
     ).toEqual(["standard"]);
     expect(changedTiersOf(current, { standard: current.standard })).toEqual(["express"]);
+  });
+});
+
+// REGRESSION (challenge #1): step 2 auto-seeds every used tier with
+// {fee: 0, freeThreshold: null}, so "the tier exists" never meant "the user
+// entered it" — an untouched wizard produced a full report of +$0.00 rows.
+describe("isCurrentSchemeEntered", () => {
+  it("rejects the wizard's auto-seeded all-zero scheme", () => {
+    expect(
+      isCurrentSchemeEntered({
+        standard: { tier: "standard", fee: 0, freeThreshold: null, avgCost: 7 },
+        express: { tier: "express", fee: 0, freeThreshold: null, avgCost: 15 },
+      })
+    ).toBe(false);
+  });
+
+  it("rejects an empty scheme", () => {
+    expect(isCurrentSchemeEntered({})).toBe(false);
+  });
+
+  it("accepts a scheme with a positive fee on any tier", () => {
+    expect(
+      isCurrentSchemeEntered({
+        standard: { tier: "standard", fee: 0, freeThreshold: null, avgCost: 7 },
+        express: { tier: "express", fee: 19.95, freeThreshold: null, avgCost: 15 },
+      })
+    ).toBe(true);
+  });
+
+  it("accepts a genuine free-shipping-everywhere scheme once a threshold is set", () => {
+    expect(
+      isCurrentSchemeEntered({
+        standard: { tier: "standard", fee: 0, freeThreshold: 100, avgCost: 7 },
+      })
+    ).toBe(true);
+  });
+
+  it("accepts the fixture the rest of these tests use", () => {
+    expect(isCurrentSchemeEntered(current)).toBe(true);
   });
 });

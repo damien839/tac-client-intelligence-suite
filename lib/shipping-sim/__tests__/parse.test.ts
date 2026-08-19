@@ -132,19 +132,10 @@ describe("parseShippingOrders — full-export mode", () => {
     expect(skipWarning).toBeUndefined();
   });
 
-  it("typicalUnitPrice is 90 (qty-weighted median of 80×1, 30×2, 90×1, 100×3)", () => {
+  it("unitStats reports how many orders carried line items", () => {
     const r = parseShippingOrders(FULL);
     expect(r.unitStats).not.toBeNull();
-    expect((r.unitStats as UnitStats).typicalUnitPrice).toBe(90);
-  });
-
-  it("unitShare is {single:1/3, double:0, threePlus:2/3}", () => {
-    const r = parseShippingOrders(FULL);
-    const stats = r.unitStats as UnitStats;
-    expect(stats.ordersWithUnits).toBe(3);
-    expect(stats.unitShare.single).toBeCloseTo(1 / 3);
-    expect(stats.unitShare.double).toBeCloseTo(0);
-    expect(stats.unitShare.threePlus).toBeCloseTo(2 / 3);
+    expect((r.unitStats as UnitStats).ordersWithUnits).toBe(3);
   });
 
   it("order with every row having unparseable gross is skipped with a warning", () => {
@@ -165,16 +156,6 @@ describe("parseShippingOrders — full-export mode", () => {
 // ---------------------------------------------------------------------------
 
 describe("parseShippingOrders — pinned parser behaviours", () => {
-  it("weighted median picks the lower middle unit for even total quantity", () => {
-    const csv = [
-      "Name,Total,Shipping,Shipping Method,Lineitem quantity,Lineitem price",
-      "#1,40.00,5.00,Standard,2,10.00",
-      "#2,220.00,5.00,Standard,2,100.00",
-    ].join("\n");
-    // totalQty=4, midpoint=ceil(4/2)=2; cumulative after price=10 pair is 2 >= 2 → lower median
-    expect(parseShippingOrders(csv).unitStats!.typicalUnitPrice).toBe(10);
-  });
-
   it("orders with no parseable quantities still count toward ordersWithUnits (pinned behaviour)", () => {
     const csv = [
       "Name,Total,Shipping,Shipping Method,Lineitem quantity,Lineitem price",

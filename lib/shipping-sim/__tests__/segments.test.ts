@@ -151,4 +151,43 @@ describe("segmentOutcomes", () => {
   it("returns [] when there are no analysable orders", () => {
     expect(segmentOutcomes([], current, candidate)).toEqual([]);
   });
+
+  // REGRESSION (challenge #3): bucket rounding kicked in at >5000 distinct grosses
+  // for the whole book but not for the smaller per-segment subsets, so the segment
+  // table and the order-impact table disagreed (4544 vs 4552) despite this
+  // function's "sum exactly" contract.
+  it("sums exactly to the whole book even past 5000 distinct order values", () => {
+    const wide: Scheme = {
+      standard: { tier: "standard", fee: 10, freeThreshold: 250, avgCost: 6 },
+    };
+    const moved: Scheme = {
+      standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 6 },
+    };
+    const orders = Array.from({ length: 5200 }, (_, i) => o(60 + i * 0.061, "standard"));
+
+    const prepared = prepareBuckets(bucketOrders(orders), wide);
+    const whole = mechanicalScenario(prepared, moved);
+    const outcomes = segmentOutcomes(orders, wide, moved);
+    const sum = (pick: (oc: (typeof outcomes)[number]) => number) =>
+      outcomes.reduce((acc, oc) => acc + pick(oc), 0);
+
+    expect(sum((oc) => oc.free)).toBe(whole.freeOrderShare * whole.orderCount);
+    expect(sum((oc) => oc.switches)).toBe(whole.impact.switchedTier);
+    expect(sum((oc) => oc.pays) + sum((oc) => oc.free)).toBe(orders.length);
+  });
+
+  it("reports whole orders, never fractions", () => {
+    const orders = Array.from({ length: 7 }, (_, i) => o(90 + i * 5, "standard"));
+    const wide: Scheme = {
+      standard: { tier: "standard", fee: 10, freeThreshold: 250, avgCost: 6 },
+    };
+    const moved: Scheme = {
+      standard: { tier: "standard", fee: 10, freeThreshold: 100, avgCost: 6 },
+    };
+    for (const outcome of segmentOutcomes(orders, wide, moved)) {
+      expect(Number.isInteger(outcome.pays)).toBe(true);
+      expect(Number.isInteger(outcome.free)).toBe(true);
+      expect(Number.isInteger(outcome.switches)).toBe(true);
+    }
+  });
 });
