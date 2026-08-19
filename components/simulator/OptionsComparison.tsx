@@ -1,414 +1,174 @@
 "use client";
 
-import InputField from "@/components/shared/InputField";
-import {
-  CANONICAL_TIERS,
-  CanonicalTier,
-  Scheme,
-  SchemeEvaluation,
-  TIER_LABELS,
-} from "@/lib/shipping-sim/types";
-import { formatCurrency, formatPercent } from "@/lib/calculations";
-import { describeStandard, signedCurrency } from "./analysis/format";
-import { ReportOption } from "./report/types";
+import { CANONICAL_TIERS, Scheme, SchemeEvaluation } from "@/lib/shipping-sim/types";
+import { formatPercent } from "@/lib/calculations";
+import { describeChangedTiers, describeStandard, signedCurrency } from "./analysis/format";
+import { MECHANICAL_CAVEAT, ReportOption } from "./report/types";
+
+/** Human summary of the row's scheme: the whole scheme for Current, the diff otherwise. */
+function describeScheme(option: ReportOption, currentScheme: Scheme): string {
+  if (option.id === "current") {
+    return CANONICAL_TIERS.filter((tier) => currentScheme[tier] !== undefined)
+      .map((tier) => describeStandard(currentScheme[tier]))
+      .join(" · ");
+  }
+  return describeChangedTiers(option.scheme, option.changedTiers);
+}
 
 interface OptionsComparisonProps {
-  /** The evaluated options (recommendations + Competitor benchmark) — same data that drives the report below. */
+  /** Evaluated candidate rows — Current first, then ordered by net shipping P&L delta. */
   options: ReportOption[];
-  currentFacts: SchemeEvaluation | null; // current scheme vs itself, behaviour zeroed
   currentScheme: Scheme;
-  /** True when recommendations were computed but came back empty (no analysable paid tier). */
-  recsEmpty: boolean;
-  cogsPercent: number | undefined;
+  /** True when candidates were built but came back empty (no analysable orders). */
+  candidatesEmpty: boolean;
   monthlyOrders: number | undefined;
-  upliftRate: number;
-  upliftWindow: number;
-  /** Typical unit price when line-item data exists — replaces the uplift-window slider. */
-  autoWindow: number | null;
-  abandonRate: number;
-  /** Printed assumptions line — built by the parent from the deferred values the table metrics were actually computed from, and shared with the report below. */
-  assumptionEcho: string;
-  onCogsChange: (value: number | undefined) => void;
-  onUpliftRateChange: (value: number) => void;
-  onUpliftWindowChange: (value: number) => void;
-  onAbandonRateChange: (value: number) => void;
 }
 
-/** One table column: Current (baseline facts) or an evaluated option. */
-interface Column {
-  key: string;
-  label: string;
-  evaluation: SchemeEvaluation | null;
-  isBaseline: boolean;
-  unconstrained?: boolean;
-  capPinned?: boolean;
-  option?: ReportOption;
-}
-
-/** One table body row — renders a string per column from its evaluation. */
-interface BodyRow {
+/** One numeric column of the grid. */
+interface GridColumn {
   key: string;
   label: string;
   tooltip: string;
   emphasize?: boolean;
-  render: (evaluation: SchemeEvaluation, isBaseline: boolean) => string;
+  render: (evaluation: SchemeEvaluation, isCurrent: boolean) => string;
 }
 
-/** Fraction -> percent for display, rounded to 0.1 to hide float artifacts (0.55 -> 55, not 55.00000000000001). */
-function toPercent(fraction: number): number {
-  return Math.round(fraction * 1000) / 10;
-}
-
-/** EV-weighted order count: whole number when integral after rounding to 1dp, else 1dp. */
-function formatVolume(count: number): string {
-  const rounded = Math.round(count * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+/** Per-order figure scaled to a monthly / annual volume. */
+function scaled(value: number, evaluation: SchemeEvaluation, orders: number, months: number): string {
+  if (evaluation.orderCount === 0) return "—";
+  return signedCurrency((value / evaluation.orderCount) * orders * months);
 }
 
 export default function OptionsComparison({
   options,
-  currentFacts,
   currentScheme,
-  recsEmpty,
-  cogsPercent,
+  candidatesEmpty,
   monthlyOrders,
-  upliftRate,
-  upliftWindow,
-  autoWindow,
-  abandonRate,
-  assumptionEcho,
-  onCogsChange,
-  onUpliftRateChange,
-  onUpliftWindowChange,
-  onAbandonRateChange,
 }: OptionsComparisonProps) {
-  const columns: Column[] = [
+  const columns: GridColumn[] = [
     {
-      key: "current",
-      label: "Current",
-      evaluation: currentFacts,
-      isBaseline: true,
-    },
-    ...options.map((option) => ({
-      key: option.key,
-      label: option.label,
-      evaluation: option.evaluation,
-      isBaseline: false,
-      unconstrained: option.unconstrained,
-      capPinned: option.capPinned,
-      option,
-    })),
-  ];
-
-  const usedTiers: CanonicalTier[] = CANONICAL_TIERS.filter(
-    (tier) =>
-      currentScheme[tier] !== undefined ||
-      options.some((option) => option.scheme[tier] !== undefined)
-  );
-
-  const orderCount = currentFacts?.orderCount ?? 0;
-  const anyUnconstrained = options.some((option) => option.unconstrained);
-  const anyCapPinned = options.some((option) => option.capPinned && !option.unconstrained);
-
-  /**
-   * Per-tier scheme summary for a column — every option carries its full multi-tier
-   * scheme, so multi-tier changes (e.g. the net-profit sweep moving both standard and
-   * express) render naturally. Changed cells are highlighted via `changedTiers`.
-   */
-  function schemeCell(col: Column, tier: CanonicalTier): string {
-    if (col.isBaseline || !col.option) return describeStandard(currentScheme[tier]);
-    return describeStandard(col.option.scheme[tier]);
-  }
-
-  function schemeCellChanged(col: Column, tier: CanonicalTier): boolean {
-    return !col.isBaseline && (col.option?.changedTiers.includes(tier) ?? false);
-  }
-
-  const volumeRows: BodyRow[] = usedTiers.map((tier) => ({
-    key: `volume-${tier}`,
-    label: `${TIER_LABELS[tier]} volume`,
-    tooltip: "Orders expected to ship on this service",
-    render: (evaluation) => {
-      const count = evaluation.volumeByTier[tier];
-      const total = usedTiers.reduce((sum, t) => sum + evaluation.volumeByTier[t], 0);
-      const share = total > 0 ? ` (${formatPercent(count / total)})` : "";
-      return `${formatVolume(count)}${share}`;
-    },
-  }));
-
-  const carrierSpendRow: BodyRow = {
-    key: "carrier-spend",
-    label: "Carrier spend",
-    tooltip: "Total expected carrier cost; bracketed figure is the change vs current",
-    render: (evaluation, base) =>
-      base || !currentFacts
-        ? formatCurrency(evaluation.carrierSpend)
-        : `${formatCurrency(evaluation.carrierSpend)} (${signedCurrency(
-            evaluation.carrierSpend - currentFacts.carrierSpend
-          )})`,
-  };
-
-  const metricRows: BodyRow[] = [
-    {
-      key: "contribution",
-      label: "Δ total contribution",
+      key: "fee-revenue",
+      label: "Fee revenue Δ",
       tooltip:
-        "The bottom line for the period uploaded: shipping P&L plus product margin gained from bigger baskets, minus margin lost to abandoned orders — after customers react.",
-      render: (m, base) => (base ? "—" : signedCurrency(m.contributionDelta)),
-      emphasize: true,
+        "Change in shipping fees collected, over the same orders you uploaded. Moves when a different share of orders sits above or below the free-shipping line.",
+      render: (e, isCurrent) => (isCurrent ? "—" : signedCurrency(e.shippingRevenueDelta)),
     },
     {
-      key: "net-shipping",
-      label: "Δ net shipping profit",
-      tooltip: "Shipping fees collected minus carrier costs, versus current.",
-      render: (m, base) => (base ? "—" : signedCurrency(m.netShippingProfitDelta)),
-    },
-    {
-      key: "basket-gain",
-      label: "Basket margin gain",
-      tooltip: "Extra product margin from customers adding items to reach the free-shipping threshold.",
-      render: (m, base) => (base || m.upliftMarginGain === 0 ? "—" : signedCurrency(m.upliftMarginGain)),
-    },
-    {
-      key: "abandon-loss",
-      label: "Abandonment margin loss",
-      tooltip: "Product margin lost from customers who abandon because shipping got more expensive.",
-      render: (m, base) => (base || m.abandonMarginLoss === 0 ? "—" : signedCurrency(-m.abandonMarginLoss)),
-    },
-    {
-      key: "orders-lost",
-      label: "Expected orders lost",
-      tooltip: "Orders expected to abandon (modelled average, not a prediction of specific orders).",
-      render: (m, base) => (base ? "—" : m.expectedOrdersLost.toFixed(1)),
-    },
-    {
-      key: "free-share",
-      label: "Free-order share",
-      tooltip: "Share of completing orders that ship free.",
-      render: (m) => formatPercent(m.freeOrderShare),
+      key: "carrier-cost",
+      label: "Carrier cost Δ",
+      tooltip:
+        "Change in what the carriers bill you. Only moves when orders land on a different service tier under the new scheme — the same orders otherwise cost the same to ship.",
+      render: (e, isCurrent) => (isCurrent ? "—" : signedCurrency(e.carrierSpendDelta)),
     },
     {
       key: "recovery",
       label: "Cost recovery",
-      tooltip: "Shipping fees collected as a share of carrier cost — 100% means customers fully fund shipping.",
-      render: (m) => formatPercent(m.recoveryRate),
+      tooltip:
+        "Shipping fees collected as a share of carrier cost — 100% means customers fully fund shipping. Shown as current → proposed.",
+      render: (e, isCurrent) =>
+        isCurrent
+          ? formatPercent(e.recoveryRateCurrent)
+          : `${formatPercent(e.recoveryRateCurrent)} → ${formatPercent(e.recoveryRate)}`,
+    },
+    {
+      key: "net",
+      label: "Net shipping P&L Δ",
+      tooltip: "Fee revenue Δ minus carrier cost Δ, versus the current scheme.",
+      emphasize: true,
+      render: (e, isCurrent) => (isCurrent ? "—" : signedCurrency(e.netShippingProfitDelta)),
     },
     ...(monthlyOrders !== undefined
       ? [
           {
             key: "monthly",
             label: "Monthly Δ (illustrative)",
-            tooltip: "Per-order contribution × your monthly volume. Illustrative only.",
-            render: (m: SchemeEvaluation, base: boolean) =>
-              base || orderCount === 0
-                ? "—"
-                : signedCurrency((m.contributionDelta / orderCount) * (monthlyOrders ?? 0)),
+            tooltip:
+              "Net shipping P&L Δ per order × your monthly volume. Illustrative scaling of the uploaded sample only.",
+            render: (e: SchemeEvaluation, isCurrent: boolean) =>
+              isCurrent ? "—" : scaled(e.netShippingProfitDelta, e, monthlyOrders, 1),
           },
           {
             key: "annual",
             label: "Annual Δ (illustrative)",
-            tooltip: "Per-order contribution × your monthly volume. Illustrative only.",
-            render: (m: SchemeEvaluation, base: boolean) =>
-              base || orderCount === 0
-                ? "—"
-                : signedCurrency((m.contributionDelta / orderCount) * (monthlyOrders ?? 0) * 12),
+            tooltip:
+              "Net shipping P&L Δ per order × your monthly volume × 12. Illustrative scaling of the uploaded sample only.",
+            render: (e: SchemeEvaluation, isCurrent: boolean) =>
+              isCurrent ? "—" : scaled(e.netShippingProfitDelta, e, monthlyOrders, 12),
           },
         ]
       : []),
   ];
 
-  const bodyRows: BodyRow[] = [...volumeRows, carrierSpendRow, ...metricRows];
+  const orderCount = options[0]?.evaluation.orderCount ?? 0;
 
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-semibold text-tac-accent">Scheme options — side-by-side</h3>
+      <h3 className="text-lg font-semibold text-tac-accent">Candidate comparison</h3>
 
-      {/* Assumptions panel */}
-      <div className="card no-print">
-        <p className="text-sm text-tac-muted mb-3">
-          Behavioural assumptions. Every number in the table shows its inputs — drag these to
-          stress-test all options at once.
-        </p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <InputField
-            label="COGS %"
-            value={toPercent(cogsPercent ?? 0)}
-            onChange={(v) => onCogsChange(v / 100)}
-            suffix="%"
-            step={1}
-            min={0}
-            max={100}
-            tooltip="Required — values the product margin gained by basket-building and lost to abandonment"
-          />
-          <InputField
-            label="Basket uplift"
-            value={toPercent(upliftRate)}
-            onChange={(v) => onUpliftRateChange(v / 100)}
-            suffix="%"
-            step={5}
-            min={0}
-            max={100}
-            tooltip="Share of orders just below a NEW free-shipping threshold that add items to qualify. Orders already near the current threshold have shown they don't build, so they're excluded."
-          />
-          {autoWindow !== null ? (
-            <div>
-              <label
-                className="label-text"
-                title="Set automatically from your uploaded line items — the quantity-weighted median unit price. One more typical unit closes this gap."
-              >
-                Uplift window
-                <span
-                  className="ml-1 text-tac-accent cursor-help"
-                  title="Set automatically from your uploaded line items — the quantity-weighted median unit price. One more typical unit closes this gap."
-                >
-                  ⓘ
-                </span>
-              </label>
-              <p className="text-sm text-tac-text py-2">
-                ~${Math.round(autoWindow)} (auto from your line items)
-              </p>
-            </div>
-          ) : (
-            <InputField
-              label="Uplift window"
-              value={upliftWindow}
-              onChange={onUpliftWindowChange}
-              prefix="$"
-              step={5}
-              min={0}
-              tooltip="How far below the threshold an order can be and still build to it"
-            />
-          )}
-          <InputField
-            label="Abandonment / $10"
-            value={toPercent(abandonRate)}
-            onChange={(v) => onAbandonRateChange(v / 100)}
-            suffix="%"
-            step={1}
-            min={0}
-            max={100}
-            tooltip="Share of affected orders that abandon for every $10 their shipping cost rises (capped at 100%). Example: at 10%, a $5 rise loses 5% of those orders; a $30 rise loses 30%."
-          />
-        </div>
-      </div>
-
-      {cogsPercent === undefined ? (
-        <div className="card no-print">
-          <p className="text-sm text-tac-warning">
-            Enter a COGS % above to unlock the side-by-side comparison — without it,
-            basket-building gains and abandonment losses can&apos;t be valued.
+      {candidatesEmpty || options.length === 0 ? (
+        <div className="card">
+          <p className="text-sm text-tac-muted">
+            No candidates — none of the uploaded orders map to a service in the current scheme.
           </p>
         </div>
       ) : (
-        <>
-          <div className="card overflow-x-auto">
-            <p className="text-sm text-tac-muted mb-3">
-              Each column is a pricing option; each row is a consequence. Current is what your
-              uploaded orders actually did. The two recommendations come from testing thousands
-              of threshold-and-fee combinations against your orders: the Cost-recovery optimiser
-              re-prices your services together — shifting volume to the cheaper service and
-              setting fees so shipping revenue matches freight cost (net-neutral, no
-              profiteering); the Basket-builder places free-shipping lines where one extra unit
-              gets the customer there. Competitor benchmark is the scheme entered below the table.
-              Read across a row to compare options; highlighted scheme cells show what each
-              option changes.
-            </p>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-tac-border text-tac-muted">
-                  <th className="text-left py-2 pr-3 font-normal">Metric</th>
-                  {columns.map((col) => (
-                    <th key={col.key} className="text-right py-2 px-3">
+        <div className="card overflow-x-auto">
+          <p className="text-sm text-tac-muted mb-3">
+            Each row re-prices the {orderCount} orders you uploaded under a different scheme, then
+            reports what changes. Nothing here is a recommendation: rows are ordered by net
+            shipping P&amp;L so the spread is easy to read, and the current scheme stays pinned at
+            the top as the baseline every delta is measured against.
+          </p>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-tac-border text-tac-muted">
+                <th className="text-left py-2 pr-3 font-normal">Option</th>
+                <th className="text-left py-2 px-3 font-normal">Scheme</th>
+                {columns.map((column) => (
+                  <th key={column.key} className="text-right py-2 px-3 font-normal" title={column.tooltip}>
+                    {column.label}
+                    <span className="ml-1 text-tac-accent cursor-help" title={column.tooltip}>ⓘ</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {options.map((option) => (
+                <tr key={option.id} className="border-b border-tac-border/30">
+                  <td className="py-2 pr-3">
+                    <span style={{ color: option.color }}>{option.label}</span>
+                    {option.isCurrent && option.id !== "current" && (
                       <span
-                        className={col.isBaseline ? "text-tac-muted" : "text-tac-accent"}
-                        title={
-                          col.option?.key === "custom"
-                            ? "Competitor benchmark assumes your product pricing (RRP) is comparable — if their RRP differs, the comparison is not like-for-like."
-                            : undefined
-                        }
+                        className="block text-xs text-tac-muted"
+                        title="This candidate is identical to the current scheme"
                       >
-                        {col.label}
-                        {col.unconstrained && <span title="Optimum may be unreliable at 0% abandonment">*</span>}
-                        {col.capPinned && !col.unconstrained && (
-                          <span title="Optimum sits at the edge of the tested range — the best value may lie beyond it. Treat as directional.">†</span>
-                        )}
+                        = current
                       </span>
-                      {col.option?.matchesCurrent && (
-                        <span
-                          className="block text-xs text-tac-muted font-normal"
-                          title="This option's best answer is your current scheme — already optimal under these assumptions"
-                        >
-                          = current
-                        </span>
-                      )}
-                    </th>
+                    )}
+                  </td>
+                  <td className="py-2 px-3 text-xs text-tac-muted">
+                    {describeScheme(option, currentScheme)}
+                  </td>
+                  {columns.map((column) => (
+                    <td
+                      key={column.key}
+                      className={`text-right py-2 px-3 ${
+                        column.emphasize && !option.isCurrent ? "font-semibold text-tac-accent" : ""
+                      }`}
+                    >
+                      {column.render(option.evaluation, option.isCurrent)}
+                    </td>
                   ))}
                 </tr>
-                {usedTiers.map((tier) => (
-                  <tr key={tier} className="border-b border-tac-border/50 text-xs text-tac-muted">
-                    <td className="py-1 pr-3">{TIER_LABELS[tier]} scheme</td>
-                    {columns.map((col) => (
-                      <td
-                        key={col.key}
-                        className={`text-right py-1 px-3 ${
-                          schemeCellChanged(col, tier) ? "text-tac-accent font-medium" : ""
-                        }`}
-                      >
-                        {schemeCell(col, tier)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </thead>
-              <tbody>
-                {bodyRows.map((row) => (
-                  <tr key={row.key} className="border-b border-tac-border/30">
-                    <td className="py-2 pr-3 text-tac-muted" title={row.tooltip}>
-                      {row.label}
-                      <span className="ml-1 text-tac-accent cursor-help" title={row.tooltip}>ⓘ</span>
-                    </td>
-                    {columns.map((col) => (
-                      <td
-                        key={col.key}
-                        className={`text-right py-2 px-3 ${
-                          row.emphasize && !col.isBaseline ? "font-semibold text-tac-accent" : ""
-                        }`}
-                      >
-                        {col.evaluation ? row.render(col.evaluation, col.isBaseline) : "—"}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="text-xs text-tac-muted mt-3">{assumptionEcho}</p>
-            <p className="text-xs text-tac-muted mt-1">
-              Competitor benchmark assumes your product pricing (RRP) is comparable — if their
-              RRP differs, the comparison is not like-for-like.
-            </p>
-            {anyUnconstrained && (
-              <p className="text-xs text-tac-warning mt-1">
-                * Abandonment is 0% — nothing stops &quot;charge everyone more&quot;, so this
-                optimum may be unreliable. Set an abandonment rate before trusting it.
-              </p>
-            )}
-            {anyCapPinned && (
-              <p className="text-xs text-tac-warning mt-1">
-                † Optimum sits at the edge of the tested range — the best value may lie beyond
-                it. Treat as directional.
-              </p>
-            )}
-          </div>
-
-          {recsEmpty && (
-            <div className="card">
-              <p className="text-sm text-tac-muted">
-                No recommendations — none of the uploaded orders map to a service in the current
-                scheme.
-              </p>
-            </div>
-          )}
-        </>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-xs text-tac-warning mt-3">{MECHANICAL_CAVEAT}</p>
+          <p className="text-xs text-tac-muted mt-1">
+            Competitor benchmark assumes your product pricing (RRP) is comparable — if their RRP
+            differs, the comparison is not like-for-like.
+          </p>
+        </div>
       )}
     </div>
   );

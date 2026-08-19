@@ -36,13 +36,9 @@ export function signedCurrency(n: number): string {
 }
 
 /**
- * Freight-shift narrative for an option that moves volume between services: names the
- * tier gaining the most EV-weighted orders and the whole-book carrier spend delta.
- *
- * The carrier saving is the full book delta (currentFacts minus evaluation), which
- * includes cost avoided because abandoned orders never ship. When abandonment is
- * material (≥ 0.05 EV orders lost), the sentence discloses that component explicitly
- * rather than attributing it all to the freight shift.
+ * Freight-shift narrative for a candidate that moves volume between services: names
+ * the tier gaining the most orders and the whole-book carrier spend delta. Order
+ * volume is constant, so the entire carrier saving is the freight shift.
  *
  * Returns null when no meaningful volume moves or carrier costs don't fall.
  */
@@ -62,18 +58,13 @@ export function freightShiftSentence(
     0
   );
   if (carrierSaving < 0.005) return null;
-  const abandonSuffix =
-    evaluation.expectedOrdersLost >= 0.05
-      ? `, partly because ${evaluation.expectedOrdersLost.toFixed(1)} expected abandoned orders no longer ship`
-      : "";
-  return `It moves ${top.delta.toFixed(1)} orders to ${TIER_LABELS[top.tier]}; total carrier spend falls ${formatCurrency(carrierSaving)}${abandonSuffix}.`;
+  return `It moves ${top.delta.toFixed(0)} orders to ${TIER_LABELS[top.tier]}; total carrier spend falls ${formatCurrency(carrierSaving)}.`;
 }
 
 /**
- * Cost-recovery narrative (v4.1): shown for the Cost-recovery optimiser when its
- * scheme moves cost recovery strictly closer to 100% than the current scheme —
- * the option's actual objective, stated next to the contribution figure.
- * Returns null when recovery didn't move toward break-even.
+ * Cost-recovery narrative: shown when a candidate moves cost recovery strictly closer
+ * to 100% than the current scheme. Returns null when recovery didn't move toward
+ * break-even.
  */
 export function recoveryMoveSentence(
   evaluation: SchemeEvaluation,

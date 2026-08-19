@@ -54,8 +54,8 @@ export default function CurveAnatomy({ stats, tierLabel, currentThreshold }: Cur
       </div>
       <p className="text-sm text-tac-muted mb-4">
         The shape of your order book before the options — what the average hides, where orders
-        cluster, whether the free-ship line already moves baskets, and how shipping cost lands across
-        the curve.
+        cluster, how they sit around today&apos;s free-ship line, and how shipping cost lands
+        across the curve.
       </p>
 
       {/* KPI strip — always visible (the at-a-glance summary). */}

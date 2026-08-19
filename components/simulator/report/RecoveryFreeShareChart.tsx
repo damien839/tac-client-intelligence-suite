@@ -61,7 +61,7 @@ export default function RecoveryFreeShareChart({
       </ResponsiveContainer>
       <p className="text-xs text-tac-muted mt-2">
         Cost recovery = shipping fees collected ÷ carrier spend — 100% means customers fully fund
-        shipping. Free-order share includes basket-builders.
+        shipping. Free-order share = the share of your orders that ship at no charge.
       </p>
     </div>
   );

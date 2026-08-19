@@ -23,9 +23,10 @@ export default function StepUpload({
   return (
     <div>
       <p className="text-tac-muted mb-4">
-        Upload a Shopify orders export — the full export is recommended (include line items to
-        unlock unit-driven recommendations). At minimum we need three columns: gross sale (Total),
-        shipping paid (Shipping), and the service selected at checkout (Shipping Method).
+        Upload a Shopify orders export — the full export is recommended (line items let the
+        report segment orders by item count). At minimum we need three columns: gross sale
+        (Total), shipping paid (Shipping), and the service selected at checkout (Shipping
+        Method).
       </p>
       <div className="mb-4 p-3 rounded-lg border border-tac-accent/30 bg-tac-accent/5 text-sm text-tac-text">
         <strong>One market at a time.</strong> Upload orders for a single country/region that shares
@@ -48,7 +49,7 @@ export default function StepUpload({
       )}
       {orders.length > 0 && unitStatsDetected && (
         <p className="text-sm text-tac-success mt-1">
-          ✓ line items detected — unit-driven analysis on
+          ✓ line items detected — order-book segmentation by item count is on
         </p>
       )}
     </div>

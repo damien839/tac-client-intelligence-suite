@@ -37,7 +37,6 @@ export default function ShippingSimulatorWizard() {
   // Steps 3 & 4 — fee/threshold per tier
   const [currentTiers, setCurrentTiers] = useState<Partial<Record<CanonicalTier, { fee: number; freeThreshold: number | null }>>>({});
   const [proposedTiers, setProposedTiers] = useState<Partial<Record<CanonicalTier, { fee: number; freeThreshold: number | null }>>>({});
-  const [cogsPercent, setCogsPercent] = useState<number | undefined>(undefined);
   const [monthlyOrders, setMonthlyOrders] = useState<number | undefined>(undefined);
 
   function handleUpload(csvText: string) {
@@ -194,16 +193,13 @@ export default function ShippingSimulatorWizard() {
           <StepProposal
             orders={taggedOrders}
             usedTiers={usedTiers}
-            unitStats={unitStats}
             tierVals={proposedTiers}
-            cogsPercent={cogsPercent}
             monthlyOrders={monthlyOrders}
             currentScheme={currentScheme}
             proposedScheme={proposedScheme}
             onChange={(tier, patch) =>
               setProposedTiers((p) => ({ ...p, [tier]: { fee: 0, freeThreshold: null, ...p[tier], ...patch } }))
             }
-            onCogsChange={setCogsPercent}
             onMonthlyOrdersChange={setMonthlyOrders}
           />
         )}

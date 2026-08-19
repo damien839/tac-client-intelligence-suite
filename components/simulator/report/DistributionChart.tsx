@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { CurveStats } from "@/lib/shipping-sim/types";
 import { formatCurrency } from "@/lib/calculations";
-import { AXIS_TICK, GRID_STROKE, NEUTRAL_COLOR, OPTION_COLORS, TOOLTIP_STYLE } from "./types";
+import { AXIS_TICK, GRID_STROKE, NEUTRAL_COLOR, ACCENT_COLOR, TOOLTIP_STYLE } from "./types";
 
 interface DistributionChartProps {
   stats: CurveStats;
@@ -20,7 +20,7 @@ interface DistributionChartProps {
   currentThreshold: number | null;
 }
 
-const ACCENT = OPTION_COLORS["net-profit"]; // tac orange, matches the report palette
+const ACCENT = ACCENT_COLOR; // tac orange, matches the report palette
 
 const PERCENTILE_ROWS: { key: keyof CurveStats["percentiles"]; label: string }[] = [
   { key: "p10", label: "p10" },

@@ -17,7 +17,6 @@ import { ReportOption, ThresholdMarker } from "./report/types";
 import VerdictCard from "./report/VerdictCard";
 import HowToReadCard from "./report/HowToReadCard";
 import CurveAnatomy from "./report/CurveAnatomy";
-import ContributionDecomposition from "./report/ContributionDecomposition";
 import RecoveryFreeShareChart from "./report/RecoveryFreeShareChart";
 import SegmentMigration from "./report/SegmentMigration";
 import OrderImpactTable from "./report/OrderImpactTable";
@@ -32,19 +31,14 @@ interface ComparisonReportProps {
   /** The tier carrying most paid volume — drives the sensitivity sweep and "Now" markers. */
   dominantTier: CanonicalTier | null;
   reconciliation: Reconciliation;
-  curves: ThresholdCurvePoint[];
+  curve: ThresholdCurvePoint[];
   /** Descriptive anatomy of the current order book — drives the Curve Anatomy section. */
   stats: CurveStats;
-  /** Buying-behaviour segments of the order book vs the current scheme. */
+  /** Segments of the order book vs the current scheme. */
   segments: Segment[];
-  /** Per-option segment outcomes, keyed by option key. */
+  /** Per-option segment outcomes, keyed by option id. */
   outcomesByOption: Record<string, SegmentOutcome[]>;
-  /** The unit window the segments were built with (typical unit price or slider). */
-  segmentWindow: number;
   monthlyOrders: number | undefined;
-  assumptionEcho: string;
-  /** Competitor scheme is identical to Current — keep it in charts/tables but out of the verdict ranking. */
-  customIsCurrent: boolean;
 }
 
 function handleExport() {
@@ -64,23 +58,17 @@ export default function ComparisonReport({
   currentScheme,
   dominantTier,
   reconciliation,
-  curves,
+  curve,
   stats,
   segments,
   outcomesByOption,
-  segmentWindow,
   monthlyOrders,
-  assumptionEcho,
-  customIsCurrent,
 }: ComparisonReportProps) {
-  // Verdict ranking: highest Δ total contribution first; a Competitor benchmark that
-  // merely restates Current carries no information, so it stays out of the narrative.
-  const rankedOptions = useMemo(
-    () =>
-      options
-        .filter((option) => !(option.key === "custom" && customIsCurrent))
-        .toSorted((a, b) => b.evaluation.contributionDelta - a.evaluation.contributionDelta),
-    [options, customIsCurrent]
+  // Candidates that actually differ from the current scheme, in grid order (net
+  // shipping P&L delta, descending). Rows identical to Current carry no information.
+  const movedOptions = useMemo(
+    () => options.filter((option) => !option.isCurrent),
+    [options]
   );
 
   // "Now" marks the swept tier's current free-over line — the one the options re-price.
@@ -95,7 +83,7 @@ export default function ComparisonReport({
   const sensitivityMarkers: ThresholdMarker[] =
     dominantTier === null
       ? []
-      : options.flatMap((option) => {
+      : movedOptions.flatMap((option) => {
           if (!option.changedTiers.includes(dominantTier)) return [];
           const threshold = option.scheme[dominantTier]?.freeThreshold;
           if (threshold === null || threshold === undefined) return [];
@@ -132,29 +120,26 @@ export default function ComparisonReport({
       <CurveAnatomy stats={stats} tierLabel={tierLabel} currentThreshold={currentThreshold} />
 
       <VerdictCard
-        rankedOptions={rankedOptions}
+        movedOptions={movedOptions}
         currentFacts={currentFacts}
         monthlyOrders={monthlyOrders}
       />
 
-      <ContributionDecomposition options={options} currentFacts={currentFacts} />
-
-      <RecoveryFreeShareChart options={options} currentFacts={currentFacts} />
+      <RecoveryFreeShareChart options={movedOptions} currentFacts={currentFacts} />
 
       <SegmentMigration
         segments={segments}
-        options={options}
+        options={movedOptions}
         outcomesByOption={outcomesByOption}
-        unitWindow={segmentWindow}
       />
 
-      <OrderImpactTable options={options} />
+      <OrderImpactTable options={movedOptions} />
 
-      <TierMixChart options={options} currentFacts={currentFacts} />
+      <TierMixChart options={movedOptions} currentFacts={currentFacts} />
 
-      {curves.length > 0 && (
+      {curve.length > 0 && (
         <ThresholdSensitivityChart
-          curves={curves}
+          curve={curve}
           currentThreshold={currentThreshold}
           markers={sensitivityMarkers}
           tierLabel={tierLabel}
@@ -162,10 +147,9 @@ export default function ComparisonReport({
       )}
 
       <FindingsCard
-        rankedOptions={rankedOptions}
+        movedOptions={movedOptions}
         currentFacts={currentFacts}
         monthlyOrders={monthlyOrders}
-        assumptionEcho={assumptionEcho}
       />
     </div>
   );

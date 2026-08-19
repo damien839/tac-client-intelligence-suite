@@ -27,8 +27,8 @@ export default function ShippingLoadChart({ stats, tierLabel }: ShippingLoadChar
     <div className="card">
       <h3 className="text-lg font-semibold mb-1 text-tac-accent">Shipping load across the curve</h3>
       <p className="text-sm text-tac-muted mb-4">
-        The {tierLabel.toLowerCase()} charge as a % of order value, by band. The smallest carts carry
-        the heaviest load — that&apos;s where below-threshold abandonment hides.
+        The {tierLabel.toLowerCase()} charge as a % of order value, by band. The smallest carts
+        carry the heaviest load — the shipping fee is the largest share of what they are worth.
       </p>
       <ResponsiveContainer width="100%" height={240}>
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 8 }}>
@@ -47,8 +47,8 @@ export default function ShippingLoadChart({ stats, tierLabel }: ShippingLoadChar
       </ResponsiveContainer>
       {medLoad !== undefined && medLoad > 0 && (
         <p className="text-xs text-tac-muted mt-2 border-l-2 border-l-tac-accent pl-3">
-          Heaviest near the median order ({formatCurrency(stats.median, 0)}), the friction point that
-          suppresses below-threshold conversion.
+          Around the median order ({formatCurrency(stats.median, 0)}) the fee is at its heaviest
+          share of order value.
         </p>
       )}
     </div>
