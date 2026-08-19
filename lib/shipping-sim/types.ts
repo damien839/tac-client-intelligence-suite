@@ -14,11 +14,19 @@ export const TIER_LABELS: Record<CanonicalTier, string> = {
   sameday: "Same Day",
 };
 
+/** Statistics derived from line-item data in a full Shopify export. */
+export interface UnitStats {
+  typicalUnitPrice: number; // quantity-weighted median line-item price
+  ordersWithUnits: number; // orders carrying line-item data
+  unitShare: { single: number; double: number; threePlus: number }; // share of orders by item count, 0..1
+}
+
 /** A raw order parsed from the Shopify CSV. */
 export interface OrderRow {
   gross: number; // gross sale / cart value
   shippingPaid: number; // shipping actually paid at checkout (ground truth)
   rawService: string; // service string as it appears in the CSV
+  units?: number; // total line-item quantity (full Shopify export only)
 }
 
 /** An order after its rawService has been mapped to a canonical tier. */
@@ -107,12 +115,50 @@ export interface Analysis {
   netDeltaPerOrder: number;
 }
 
+export interface CurvePercentiles {
+  p10: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p90: number;
+  p95: number;
+  p99: number;
+}
+
+/** Descriptive anatomy of the order-value curve under the current scheme. */
+export interface CurveStats {
+  count: number;
+  mean: number;
+  median: number;
+  stdev: number;
+  min: number;
+  max: number;
+  percentiles: CurvePercentiles;
+  skewPct: number; // mean/median - 1, as a percentage (0 when median is 0)
+  /** $25 bands; the final band is open-ended (hi === null). */
+  histogram: { lo: number; hi: number | null; n: number }[];
+  /** Most common exact subtotals (rounded to the cent), count-desc, capped at 12. */
+  pricePoints: { value: number; n: number }[];
+  /**
+   * $5 bands spanning the dominant tier's current free-ship line ±$50, for the
+   * threshold-pull visual. Null when the dominant tier is flat (no threshold to build to).
+   */
+  pullZone: { threshold: number; bands: { lo: number; n: number }[] } | null;
+  /** Dominant tier's current fee as a % of band midpoint; bands at/above a free line read 0%. */
+  shippingLoad: { lo: number; hi: number; loadPct: number; n: number }[];
+  freeAov: number; // AOV of orders that ship free under the current scheme
+  paidAov: number; // AOV of orders that pay shipping under the current scheme
+  freeN: number;
+  paidN: number;
+  shipRevPctGmv: number; // Σ current fee / Σ gross (0 when GMV is 0)
+}
+
 /** Tunable behavioural assumptions driving the recommendation engine. */
 export interface BehaviorParams {
   cogsPercent: number; // 0..1 — required to value product-margin effects
   upliftRate: number; // 0..1 — share of in-window orders that build baskets to the threshold
   upliftWindow: number; // $ — "in window" = within this much below the landed tier's threshold
-  abandonRate: number; // 0..1 — share of worse-off orders (shipping cost rose vs current) that abandon
+  abandonRate: number; // 0..1 — share abandoning *per $10 of shipping-cost increase*, capped at 100% (e.g. 0.1 → 10% abandon per $10 increase, so a $30 increase → 30% abandon)
 }
 
 /** Orders grouped by identical behaviour under the model. */
@@ -132,22 +178,102 @@ export interface BehavioralResult {
   expectedOrdersLost: number; // abandonment, in (fractional) orders
   freeOrderShare: number; // 0..1 of completing orders that ship free
   recoveryRate: number; // shippingRevenue / carrierSpend (0 when spend is 0)
+  /** EV-weighted completing-order volume per landed tier. */
+  volumeByTier: Record<CanonicalTier, number>;
+  /** EV-weighted carrier spend per landed tier. */
+  carrierSpendByTier: Record<CanonicalTier, number>;
+  /**
+   * EV-weighted order counts describing how the candidate moves orders vs current.
+   * Builders are NOT included in newlyFree — each count captures its own mechanism
+   * (builders are in-window orders that build baskets; newlyFree are completing payers
+   * whose fee dropped to zero).
+   */
+  impact: {
+    newlyPaying: number; // paid $0 under current, pays >$0 under candidate (completing payers only)
+    newlyFree: number; // paid >$0 under current, ships $0 under candidate (completing payers only — builders counted separately)
+    builders: number; // basket-building weight
+    switchedTier: number; // completing weight landing on a different tier than chosen
+  };
 }
 
-export type RecommendationId = "profit-first" | "threshold-fee" | "basket-builder";
+export type RecommendationId = "net-profit" | "basket-builder";
+
+/** Behavioural metrics for one arbitrary candidate scheme (used for the Competitor benchmark column). */
+export interface SchemeEvaluation {
+  contributionDelta: number;
+  netShippingProfitDelta: number;
+  shippingRevenue: number;
+  carrierSpend: number;
+  netShippingProfit: number;
+  upliftMarginGain: number;
+  abandonMarginLoss: number;
+  expectedOrdersLost: number;
+  freeOrderShare: number;
+  recoveryRate: number;
+  orderCount: number; // analysable orders the evaluation covers
+  /** EV-weighted completing-order volume per landed tier. */
+  volumeByTier: Record<CanonicalTier, number>;
+  /** EV-weighted carrier spend per landed tier. */
+  carrierSpendByTier: Record<CanonicalTier, number>;
+  impact: BehavioralResult["impact"];
+}
+
+export interface ThresholdCurvePoint {
+  threshold: number;
+  contributionNoUplift: number; // Δ total contribution vs current, basket-building off
+  contributionWithUplift: number; // same, basket-building per the caller's params
+}
+
+/** Buying-behaviour band by line-item count; "unknown" when no line-item data. */
+export type ItemBand = "single" | "double" | "threePlus" | "unknown";
+
+/**
+ * Where an order's value sits vs its CURRENT tier's free threshold:
+ * at/above it, within one unit-window below it, or well below it.
+ * Convention for flat tiers (no threshold): there is nothing to build toward, so
+ * orders are "wellBelow" — unless the flat fee is 0 (everyone already ships free),
+ * which reports "atOrAbove".
+ */
+export type ValuePosition = "wellBelow" | "withinOneUnit" | "atOrAbove";
+
+/** One buying-behaviour segment of the order book vs the current scheme. */
+export interface Segment {
+  key: string; // e.g. "single|withinOneUnit|standard"
+  itemBand: ItemBand;
+  position: ValuePosition;
+  tier: CanonicalTier;
+  orders: number;
+  valueShare: number; // share of total gross across analysable orders, 0..1
+}
+
+/** EV-weighted order outcomes for one segment under a candidate scheme. */
+export interface SegmentOutcome {
+  segmentKey: string;
+  pays: number;
+  free: number;
+  builds: number;
+  switches: number;
+  abandons: number;
+}
 
 /** One recommendation card. */
 export interface RecommendedScheme {
   id: RecommendationId;
-  label: string;
-  threshold: number | null; // recommended standard free-over (null = flat)
-  fee: number; // standard fee (= current fee for profit-first / basket-builder)
+  label: string; // "Net profit maximiser" | "Basket-builder"
+  /** The full candidate scheme — may change multiple tiers. */
+  scheme: Scheme;
+  /** Tiers whose fee or free threshold differ from the current scheme. */
+  changedTiers: CanonicalTier[];
   contributionDelta: number; // objective: shipping P&L delta + margin effects, vs current
   netShippingProfitDelta: number;
-  upliftMarginGain: number; // 0 for profit-first / threshold-fee
+  upliftMarginGain: number; // 0 for net-profit (uplift forced off)
   abandonMarginLoss: number;
+  expectedOrdersLost: number;
   freeOrderShare: number;
   recoveryRate: number;
-  expectedOrdersLost: number;
   unconstrained: boolean; // degeneracy guard tripped — see recommend.ts
+  /** Optimum sits at the sweep limit — the true optimum may lie beyond the tested range. */
+  capPinned: boolean;
+  /** Basket-builder only: "Free over $215 — your $140–$170 orders add one ~$45 unit to qualify." */
+  basketNarrative?: string;
 }

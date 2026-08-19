@@ -109,6 +109,93 @@ Engine addition: `evaluateScheme(orders, current, candidate, behavior)` exported
 
 Brand: existing `tac-*` tokens, consistent with the rest of the analysis panel.
 
+## Reporting under the table — v3 comparative report (revised 2026-06-10 after Damo feedback; supersedes the v2 drill-down)
+
+Damo: "all the reporting under the table needs to be redone, it doesn't make sense anymore." The v2 drill-down was the old current-vs-proposed report: "proposal" language, one option at a time, and behaviour-free numbers that contradicted the table above it. Decisions: **comparative sections** (every section covers all options at once, no tabs) and **behaviour-consistent numbers everywhere** (the same expected-value model as the table; the mechanical no-behaviour view disappears).
+
+### Engine additions (`lib/shipping-sim/`, TDD)
+
+- `BehavioralResult` gains EV-weighted order-impact counts: `impact: { newlyPaying, newlyFree, builders, switchedTier }` (abandoners already exist as `expectedOrdersLost`). "Newly paying/free" compare the order's candidate shipping fee against its current fee; builders = basket-building weight; switchedTier = weight landing on a different tier than chosen.
+- `SchemeEvaluation` gains the absolutes `shippingRevenue`, `carrierSpend`, `netShippingProfit` and the `impact` counts, so the report can decompose contribution without re-deriving anything.
+- New `thresholdCurves(orders, current, behavior)`: for each numeric threshold candidate (standard fee held at current), the contribution delta with uplift off and with uplift on — `{ threshold, contributionNoUplift, contributionWithUplift }[]`. Powers the sensitivity chart.
+
+### Report sections (`components/simulator/ComparisonReport.tsx`, replaces BenchmarkPanel)
+
+Rendered directly under the comparison table; the whole report is printable and the PDF-export button moves here. Sections, in order:
+
+1. **Reconciliation badge** — reuse `ReconciliationBadge`; reconciliation computed from Σ `shippingPaid` vs the Current column's deterministic revenue (no `analyze()` needed).
+2. **Headline verdict** — one narrative card: the option with the highest Δ total contribution, its expected cost (orders lost, free-share shift), and the runner-up trade-off. Custom included when it differs from current.
+3. **Contribution decomposition chart** — stacked bar per option: Δ shipping fee revenue, Δ carrier spend (sign-flipped so savings stack positive), basket margin gain, abandonment margin loss (negative); the stack nets to Δ total contribution.
+4. **Recovery & free-share comparison** — grouped bars across Current + options: cost recovery %, free-order share %.
+5. **Order impact table** — rows: Newly paying, Newly free, Build baskets, Switch tier, Abandon (expected, 1dp); columns: the options. EV-weighted counts from `impact`.
+6. **AOV distribution** — reuse `AovDistribution` (prop changed from `movement` to plain gross values since `analyze()` is no longer in the path), markers for the current threshold and each option's threshold.
+7. **Threshold sensitivity** — line chart of contribution vs standard free-over threshold from `thresholdCurves`: one line without basket-building, one with; reference lines at current + each option's threshold.
+8. **Findings** — comparative bullets (which option wins and why, where the money comes from, what it risks, illustrative monthly/annual scaling when volume is set) with the assumption echo.
+
+### Removals
+
+- `BenchmarkPanel.tsx` and its single-option children (`VerdictHeader`, `ProfitBridge`, `RecoveryGauges`, `TierEconomicsTable`, `MovementTable`, `CarrierMixChart`, `ThresholdSweepChart`, `Findings`) are deleted. `ReconciliationBadge`, `AovDistribution`, `format.ts` survive.
+- The drill-down tab strip, `selected`/`activeKey` state, and `analyze()` usage in StepProposal go away. `lib/shipping-sim/analysis.ts` stays (tested, used by nothing in the UI — candidate for later cleanup).
+- Pre-COGS, the report shows only the reconciliation badge plus the COGS prompt (no option data exists to report on).
+
+## v3.1 amendments (2026-06-10, after Damo's first real-data run)
+
+Real 525-order dataset surfaced three issues:
+
+1. **Flat abandonment is degenerate.** With a $30 fee, "Optimised" recommended $60 flat (+$3,029) — pinned at the fee sweep cap, because 10% of worse-off orders abandon regardless of how much worse off they are, so charging more almost always wins. **Fix: magnitude-scaled abandonment.** `abandonRate` now means *share abandoning per $10 of shipping-cost increase*, capped at 100%: `abandonProb = min(1, abandonRate × (landedFee − currentFee) / 10)` when the increase is positive. Slider label/tooltip/echo updated accordingly. Existing $10-increase fixtures keep their expected values by construction.
+2. **Express invisible.** The comparison table only summarised the standard tier. Fix: one scheme-summary row per used tier — recommendations leave non-standard tiers at current (shown as such); Custom shows its own per-tier config.
+3. **No volume split / cost shift.** Engine: `BehavioralResult` (and `SchemeEvaluation`) gain `volumeByTier` and `carrierSpendByTier` (EV-weighted, by landed tier, completing orders). Comparison table gains per-used-tier volume rows (count + share of completing) and a carrier-spend row (absolute for Current, absolute + signed Δ for options). Report gains a **Tier volume mix** grouped-bar section (Current + options × used tiers) between the order-impact table and the AOV distribution.
+
+The comparison table is now driven by the same per-option `ReportOption`/`SchemeEvaluation` data as the report (single source), replacing its direct use of `RecommendedScheme` metrics.
+
+4. **Sections are confusing without context** (Damo: "can you explain each section better"). Every report section and the comparison table open with a one-to-two-sentence plain-English explainer — what the section shows, how to read it, what to look for — in muted text that PRINTS (the client reads the PDF without us in the room). Comparison-table metric rows get a tooltip (ⓘ title) defining each metric in plain words. Explainers must describe the reader's decision, not the implementation ("Which option makes the most money after customers react" — not "EV-weighted contribution delta").
+
+**5. Revealed-preference guard on uplift.** Basket-building only applies where the candidate creates a NEW window — orders already within the uplift window of their current tier's threshold demonstrably didn't build, so they're excluded. Guarantees evaluating the current scheme against itself is a strict no-op under any behaviour settings.
+
+## v3.2 — dominant-tier optimisation + no-op badges (2026-06-10, after Damo's second real-data run)
+
+Real data: 80% of orders ship express at $60 flat; standard (the only tier the optimizer touched) is mostly free already and genuinely sits at a local optimum — so all three recommendations resolved to the current scheme and every column was identical, with no explanation in the table. Decisions:
+
+1. **Optimize the dominant paid tier.** The three sweeps target whichever used tier has the most PAID orders under the current scheme (`dominantPaidTier()` — most orders with `currentFee > 0`; tie or all-free falls back to most total volume, then canonical order). All sweep mechanics are unchanged, just applied to that tier's fee/threshold; other tiers stay at current. `RecommendedScheme` gains `tier: CanonicalTier`. `thresholdCurves` sweeps the same tier. The UI states which service the recommendations re-price (table explainer, footnote, sensitivity caption, AOV markers); the old "no standard tier" edge becomes "no analysable paid tier".
+2. **No-op badge.** When an option's recommended config equals the current scheme's config for the optimised tier, its column header shows an "= current" badge (title: already optimal under these assumptions) and the scheme row reads as unchanged. The verdict's keep-current branch continues to carry the narrative.
+
+## v4 — buying-behaviour redesign (2026-06-12, per Damo's first-principles rethink)
+
+Damo's direction, restated: Option 1 must improve **net profit** through two engines — maximising shipping revenue AND shifting freight from express to standard (carrier saving). Basket-building must read the **complete order range** and place thresholds at the price point that drives **one additional unit**, based on the AOV/unit data in the Shopify export — and that applies to free-express thresholds too ("if free express is selected above a certain value, that value should be driving another unit"). Orders go into behaviour **buckets** that visibly shift under each option. Custom becomes **Competitor benchmark** (enter a competitor's scheme; highlight that the comparison assumes comparable RRP).
+
+### Option lineup (replaces Profit-first / Optimised / Basket-builder)
+
+1. **Net profit maximiser** — sweeps levers across BOTH paid tiers: standard threshold × standard fee × express fee (express threshold drawn from the unit-driven candidate set below, plus flat). Objective: expected total contribution. The report explicitly narrates the freight shift: orders moved express→standard and the carrier saving, alongside fee-revenue recovery. Grid is bounded coarse-to-fine to stay interactive (target <500ms typical; budget documented in the plan).
+2. **Basket-builder (unit-driven)** — threshold candidates are derived from the data, not assumed: (a) order-value clusters from a $10-bin histogram of gross; (b) **typical unit price** = quantity-weighted median line-item price (full export) — candidates = cluster edge + one typical unit, rounded to $5, generated for standard AND express free-over lines. The uplift window defaults to the typical unit price ("orders within one unit of the threshold add a unit"); the uplift-rate slider stays as the tunable share. Recommendation copy names the cluster and the unit: "Free over $X — your $140–$170 orders add one ~$45 unit to qualify." Without line items it falls back to today's slider-driven sweep.
+3. **Competitor benchmark** — the manual column, renamed; intro copy: "Enter a competitor's shipping scheme to see what matching it would do. Assumes your product pricing (RRP) is comparable — if their RRP differs, the comparison is not like-for-like." (printed).
+
+### Buying-behaviour buckets
+
+Auto-derived segments, computed per option: item count (1 / 2 / 3+) × position vs the option's relevant threshold (well below / within one unit / at-or-above) × chosen service. A new report section lists each bucket (name, orders, value share) and where it lands under each option (pays / free / builds / switches service / abandons — EV-weighted). This subsumes the order-impact table as the primary "what moves" story; buckets are the unit of explanation in findings and verdict.
+
+### Parser — dual mode
+
+- **Full Shopify orders export** (detected by `Name` + `Lineitem quantity` + `Lineitem price` columns): rows grouped by order Name; order gross/shipping/method from the order-level row; `units` = Σ line-item quantities; line-item prices feed the unit-price distribution. Unlocks unit-driven thresholds and item-count buckets.
+- **Summary CSV** (current 3 columns): keeps working; unit-driven features fall back to sliders; buckets degrade to value-position × service.
+- `OrderRow` gains optional `units?: number`; a new `UnitStats` (typical unit price, units/order distribution) flows into the engine.
+
+### Out of scope for v4
+
+- Conversion-gain lever for price decreases (raised 2026-06-10, still open — revisit after v4).
+- Multi-market/currency handling; per-item express surcharges (the "after the 3rd item" idea resolved to unit-driving thresholds instead).
+
+## v4.1 — cost-neutral objective + materiality floor (2026-06-12, after Damo's real-data run of v4)
+
+Real data exposed two problems:
+
+1. **The maximiser profiteers on freight.** It recommended std $60 / exp $92 → 149.3% cost recovery (+$10,860) by exploiting price-parity switching. Damo: "completely unreasonable… the net profit maximiser should focus on recovering all shipping costs so there is a net neutral outcome on shipping revenue and cost." **New objective for Option 1 (renamed "Cost-recovery optimiser", id stays `net-profit`):** lexicographic — (a) candidates whose |shippingRevenue − carrierSpend| ≤ 2% of their carrierSpend are "neutral"; among neutral candidates pick max contributionDelta (rewards freight shifting and low abandonment); (b) if no candidate is neutral, minimise the distance to neutral, tie-broken by contribution. Levers and sweeps unchanged. The charge-more degeneracy disappears under this objective (overshoot is penalised by distance), so `unconstrained` is always false for this option; `capPinned` stays. Expected behaviour on Damo's book: shift freight to standard, then LOWER fees until revenue ≈ the reduced cost — customers pay less, subsidy closes, recovery ≈ 100%.
+2. **Float-dust winners.** Basket-builder recommended a changed scheme showing +$0.00 (delta below display precision beat keep-current). **Materiality floor:** any sweep winner with `contributionDelta < $1` collapses to keep-current (changedTiers [], exact-zero metrics, no narrative). Applies to both options. **Cost-recovery exception (as built):** an overshoot correction (e.g. 149% recovery back to ~100%) lowers revenue, so its contribution is negative by design — the floor spares any winner whose `|revenue − cost|` is strictly smaller than the current scheme's. Only winners that neither make material money nor move the book closer to neutral collapse.
+
+### v4.1 as-built amendments (2026-06-12, implementation findings)
+
+1. **Second refine seed in the multi-tier sweep.** The neutral set is a thin manifold in fee space (often a single $1 fee value), so the $2/$20 coarse grid can miss the best neutral basin entirely while containing a much worse neutral elsewhere — and under the lexicographic objective that worse neutral dominates the coarse argmax, trapping the single refine pass. Verified on the freight-shift test fixture: coarse-best was "raise both fees to ~$28" (neutral, +$162) while the true optimum was "shift freight, charge everyone $5" (neutral, +$350, fee $5 not on the coarse grid). Fix: also refine around the best NON-neutral coarse candidate (smallest distance to neutral — it brackets where the manifold crosses between coarse grid points); the winner is the comparator-best over everything considered. Budget: one extra ≤125-evaluation refine pass.
+2. **The Damo-shaped TEST fixture shows no freight shift under the new objective** (exhaustive 457k-candidate search). That fixture is already 97.9% recovered, and any express re-pricing dumps switchers into the standard free band (T $250 < most express carts), destroying $60 fees faster than it saves $30 freight — so no freight shift reaches the ±2% band. The lexicographic winner is std fee $30→$32 (recovery 98.1%, −$0.30 contribution, spared by the neutrality exception). The "shift freight then lower fees" narrative is real but belongs to subsidised books — demonstrated by the freight-shift fixture (recovery 42.6% → 100%, +$350, customers pay less). The expectation that the Damo fixture itself would freight-shift was wrong: it never had the real book's subsidy.
+
 ### v1 UI (superseded, kept for history)
 
 Three cards with one-click Apply writing into the proposal inputs; "applied" state on the matching card. Replaced because applying mutated the single report instead of presenting the three options side by side.

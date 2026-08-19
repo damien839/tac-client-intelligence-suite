@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Nav from "@/components/shared/Nav";
 import { parseShippingOrders } from "@/lib/shipping-sim/parse";
-import { analyze } from "@/lib/shipping-sim/analysis";
 import {
   CanonicalTier,
   OrderRow,
   Scheme,
   TaggedOrder,
   TierConfig,
+  UnitStats,
 } from "@/lib/shipping-sim/types";
 import StepUpload from "./steps/StepUpload";
 import StepMapServices from "./steps/StepMapServices";
@@ -28,6 +28,7 @@ export default function ShippingSimulatorWizard() {
   const [services, setServices] = useState<string[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
+  const [unitStats, setUnitStats] = useState<UnitStats | null>(null);
 
   // Step 2
   const [serviceMap, setServiceMap] = useState<ServiceMap>({});
@@ -45,6 +46,7 @@ export default function ShippingSimulatorWizard() {
     setServices(r.services);
     setParseErrors(r.errors);
     setParseWarnings(r.warnings);
+    setUnitStats(r.unitStats); // resets to null on summary-mode re-uploads
   }
 
   // Tiers actually used (mapped to a canonical tier, not excluded)
@@ -88,15 +90,10 @@ export default function ShippingSimulatorWizard() {
     [usedTiers, avgCosts]
   );
 
-  // Stable scheme identities — RecommendationCards memoizes its sweep on these,
+  // Stable scheme identities — StepProposal memoizes its sweep on these,
   // so inline buildScheme() calls would re-run it on every wizard render.
   const currentScheme = useMemo(() => buildScheme(currentTiers), [buildScheme, currentTiers]);
   const proposedScheme = useMemo(() => buildScheme(proposedTiers), [buildScheme, proposedTiers]);
-
-  const analysis = useMemo(() => {
-    if (step < 3 || taggedOrders.length === 0 || usedTiers.length === 0) return null;
-    return analyze(taggedOrders, currentScheme, proposedScheme, { cogsPercent });
-  }, [step, taggedOrders, usedTiers, currentScheme, proposedScheme, cogsPercent]);
 
   // Seed any unconfigured current-scheme tiers with defaults when the user reaches
   // step 2, so a merchant whose real scheme matches the defaults can proceed without
@@ -168,6 +165,7 @@ export default function ShippingSimulatorWizard() {
             orders={orders}
             errors={parseErrors}
             warnings={parseWarnings}
+            unitStatsDetected={unitStats !== null}
             onUpload={handleUpload}
           />
         )}
@@ -196,10 +194,10 @@ export default function ShippingSimulatorWizard() {
           <StepProposal
             orders={taggedOrders}
             usedTiers={usedTiers}
+            unitStats={unitStats}
             tierVals={proposedTiers}
             cogsPercent={cogsPercent}
             monthlyOrders={monthlyOrders}
-            analysis={analysis}
             currentScheme={currentScheme}
             proposedScheme={proposedScheme}
             onChange={(tier, patch) =>
@@ -207,7 +205,6 @@ export default function ShippingSimulatorWizard() {
             }
             onCogsChange={setCogsPercent}
             onMonthlyOrdersChange={setMonthlyOrders}
-            onApply={(patch) => setProposedTiers((p) => ({ ...p, standard: patch }))}
           />
         )}
 
