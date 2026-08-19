@@ -9,41 +9,41 @@ import {
   TaggedOrder,
 } from "./types";
 
-/** Above this many distinct (tier, gross) pairs, gross is rounded to the dollar. */
-const MAX_EXACT_BUCKETS = 5000;
-
 /**
- * Group orders that are treated identically by the model. Exact (tier, gross)
- * grouping first; falls back to dollar-rounded gross on pathological data so
- * sweep cost stays bounded.
+ * Group orders that are treated identically by the model, keyed on the EXACT
+ * (tier, gross) pair.
+ *
+ * Bucketing must never round: gross is compared against free-shipping thresholds,
+ * so a rounded $249.60 becomes $250 and silently ships free. That made a scheme's
+ * fee revenue depend on how many distinct order values happened to be in the
+ * upload, and made per-segment totals disagree with the whole-book figure.
+ * Exact grouping is affordable — the grid runs a handful of O(buckets) passes.
  */
 export function bucketOrders(orders: TaggedOrder[]): OrderBucket[] {
-  const build = (round: boolean): OrderBucket[] => {
-    const map = new Map<string, OrderBucket>();
-    for (const order of orders) {
-      const gross = round ? Math.round(order.gross) : order.gross;
-      const key = `${order.tier}|${gross}`;
-      const existing = map.get(key);
-      map.set(
-        key,
-        existing
-          ? { ...existing, count: existing.count + 1 }
-          : { tier: order.tier, gross, count: 1 }
-      );
-    }
-    return Array.from(map.values());
-  };
-  const exact = build(false);
-  return exact.length > MAX_EXACT_BUCKETS ? build(true) : exact;
+  const map = new Map<string, OrderBucket>();
+  for (const order of orders) {
+    const key = `${order.tier}|${order.gross}`;
+    const existing = map.get(key);
+    map.set(
+      key,
+      existing
+        ? { ...existing, count: existing.count + 1 }
+        : { tier: order.tier, gross: order.gross, count: 1 }
+    );
+  }
+  return Array.from(map.values());
 }
 
 /**
- * The tier the candidate grid targets: the used tier with the most PAID orders
- * under the current scheme (most orders with a positive current fee).
- * Tie or all-free falls back to most total volume, then canonical tier order.
+ * The tier the candidate grid targets: the used tier carrying the most orders.
+ *
+ * Volume first, paid count only as a tie-break. Ranking by paid count instead
+ * would send the grid at a small paid tier (10 paid Express orders) and never
+ * explore the free line on the tier that actually carries the book (80 free
+ * Standard orders) — the one lever worth comparing.
  * Returns null when there are no analysable orders.
  */
-export function dominantPaidTier(orders: TaggedOrder[], current: Scheme): CanonicalTier | null {
+export function dominantTier(orders: TaggedOrder[], current: Scheme): CanonicalTier | null {
   const valid = orders.filter((o) => current[o.tier] !== undefined);
   if (valid.length === 0) return null;
 
@@ -58,20 +58,20 @@ export function dominantPaidTier(orders: TaggedOrder[], current: Scheme): Canoni
   }
 
   let best: CanonicalTier | null = null;
-  let bestPaid = -1;
   let bestTotal = -1;
+  let bestPaid = -1;
   for (const tier of CANONICAL_TIERS) {
-    const p = paid[tier] ?? 0;
     const t = total[tier] ?? 0;
+    const p = paid[tier] ?? 0;
     if (t === 0) continue;
     if (
-      p > bestPaid ||
-      (p === bestPaid && t > bestTotal)
+      t > bestTotal ||
+      (t === bestTotal && p > bestPaid)
       // canonical order: CANONICAL_TIERS is iterated in order, strict > keeps earliest
     ) {
       best = tier;
-      bestPaid = p;
       bestTotal = t;
+      bestPaid = p;
     }
   }
   return best;
@@ -169,13 +169,6 @@ export function mechanicalScenario(
     carrierSpendByTier,
     impact: { newlyPaying, newlyFree, switchedTier },
   };
-}
-
-export function baselineNetOf(prepared: PreparedBucket[], current: Scheme): number {
-  return prepared.reduce(
-    (sum, b) => sum + (b.currentFee - current[b.tier]!.avgCost) * b.count,
-    0
-  );
 }
 
 const THRESHOLD_STEP = 10;

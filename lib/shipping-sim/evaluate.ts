@@ -1,7 +1,6 @@
 import {
-  baselineNetOf,
   bucketOrders,
-  dominantPaidTier,
+  dominantTier,
   mechanicalScenario,
   prepareBuckets,
   thresholdCandidates,
@@ -29,6 +28,25 @@ export function changedTiersOf(current: Scheme, candidate: Scheme): CanonicalTie
 /** Orders the engine can analyse: those whose chosen tier exists in the current scheme. */
 export function analysableOrders(orders: TaggedOrder[], current: Scheme): TaggedOrder[] {
   return orders.filter((order) => current[order.tier] !== undefined);
+}
+
+/**
+ * THE REPORT GATE — the single place that decides whether the current scheme has
+ * actually been entered.
+ *
+ * Invariant: the report body renders only when at least one configured tier carries
+ * a positive fee OR an explicit free-shipping threshold. The wizard auto-seeds every
+ * used tier with `{ fee: 0, freeThreshold: null }` so the user can page forward, and
+ * that seed is indistinguishable from a real "everything ships free, always" scheme
+ * by existence alone. Without this check a user who entered nothing gets a full
+ * report of +$0.00 rows presented as findings.
+ */
+export function isCurrentSchemeEntered(current: Scheme): boolean {
+  return CANONICAL_TIERS.some((tier) => {
+    const config = current[tier];
+    if (!config) return false;
+    return config.fee > 0 || config.freeThreshold !== null;
+  });
 }
 
 /**
@@ -74,13 +92,15 @@ export function thresholdCurve(
   orders: TaggedOrder[],
   current: Scheme
 ): ThresholdCurvePoint[] {
-  const tier = dominantPaidTier(orders, current);
+  const tier = dominantTier(orders, current);
   if (!tier) return [];
   const target = current[tier]!;
   const valid = analysableOrders(orders, current);
   if (valid.length === 0) return [];
   const prepared = prepareBuckets(bucketOrders(valid), current);
-  const baselineNet = baselineNetOf(prepared, current);
+  // Baseline comes from the SAME summation the curve points use, so the point at
+  // the current threshold is exactly 0 rather than float residue rendering "-$0.00".
+  const baselineNet = mechanicalScenario(prepared, current).netShippingProfit;
   return thresholdCandidates(valid).map((threshold) => {
     const candidate: Scheme = { ...current, [tier]: { ...target, freeThreshold: threshold } };
     const result = mechanicalScenario(prepared, candidate);
