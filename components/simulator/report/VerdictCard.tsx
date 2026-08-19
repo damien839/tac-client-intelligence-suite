@@ -75,9 +75,9 @@ export default function VerdictCard({
         {formatPercent(currentFacts.freeOrderShare, 0)} → {formatPercent(e.freeOrderShare, 0)}.
       </p>
       {freightShift && <p className="text-sm text-tac-muted mb-2">{freightShift}</p>}
-      {e.impact.newlyPaying >= 0.5 && (
+      {e.impact.newlyPaying > 0 && (
         <p className="text-sm text-tac-muted mb-2">
-          It puts {e.impact.newlyPaying.toFixed(0)} orders that ship free today onto a paid fee.
+          It puts {e.impact.newlyPaying} orders that ship free today onto a paid fee.
           Those orders are counted here at full fee value; whether every one of them would still
           have been placed is not modelled.
         </p>

@@ -13,8 +13,9 @@ const ROWS: { label: string; value: (e: SchemeEvaluation) => number }[] = [
   { label: "Land on a different service", value: (e) => e.impact.switchedTier },
 ];
 
+/** Counts are exact whole orders — never render "12.0" under a "whole orders" caption. */
 function renderCount(value: number): string {
-  return value < 0.05 ? "—" : value.toFixed(1);
+  return value === 0 ? "—" : String(Math.round(value));
 }
 
 export default function OrderImpactTable({ options }: OrderImpactTableProps) {

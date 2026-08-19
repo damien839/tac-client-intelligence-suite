@@ -135,16 +135,11 @@ export default function OptionsComparison({
             <tbody>
               {options.map((option) => (
                 <tr key={option.id} className="border-b border-tac-border/30">
+                  {/* evaluateCandidates drops any row whose outcome duplicates
+                      current's, so a non-current row identical to current cannot
+                      reach this table — no "= current" badge branch is needed. */}
                   <td className="py-2 pr-3">
                     <span style={{ color: option.color }}>{option.label}</span>
-                    {option.isCurrent && option.id !== "current" && (
-                      <span
-                        className="block text-xs text-tac-muted"
-                        title="This candidate is identical to the current scheme"
-                      >
-                        = current
-                      </span>
-                    )}
                   </td>
                   <td className="py-2 px-3 text-xs text-tac-muted">
                     {describeScheme(option, currentScheme)}

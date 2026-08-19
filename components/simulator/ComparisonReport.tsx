@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import {
   CanonicalTier,
   CurveStats,
-  Reconciliation,
   Scheme,
   SchemeEvaluation,
   Segment,
@@ -12,7 +11,6 @@ import {
   ThresholdCurvePoint,
   TIER_LABELS,
 } from "@/lib/shipping-sim/types";
-import ReconciliationBadge from "./analysis/ReconciliationBadge";
 import { ReportOption, ThresholdMarker } from "./report/types";
 import VerdictCard from "./report/VerdictCard";
 import HowToReadCard from "./report/HowToReadCard";
@@ -28,9 +26,8 @@ interface ComparisonReportProps {
   options: ReportOption[];
   currentFacts: SchemeEvaluation;
   currentScheme: Scheme;
-  /** The tier carrying most paid volume — drives the sensitivity sweep and "Now" markers. */
+  /** The tier carrying most volume — drives the sensitivity sweep and "Now" markers. */
   dominantTier: CanonicalTier | null;
-  reconciliation: Reconciliation;
   curve: ThresholdCurvePoint[];
   /** Descriptive anatomy of the current order book — drives the Curve Anatomy section. */
   stats: CurveStats;
@@ -41,23 +38,11 @@ interface ComparisonReportProps {
   monthlyOrders: number | undefined;
 }
 
-function handleExport() {
-  const previous = document.title;
-  document.title = "Shipping Strategy Options Report";
-  const restore = () => {
-    document.title = previous;
-    window.removeEventListener("afterprint", restore);
-  };
-  window.addEventListener("afterprint", restore);
-  window.print();
-}
-
 export default function ComparisonReport({
   options,
   currentFacts,
   currentScheme,
   dominantTier,
-  reconciliation,
   curve,
   stats,
   segments,
@@ -91,30 +76,8 @@ export default function ComparisonReport({
           return [{ value: threshold, label: option.shortLabel, color: option.color }];
         });
 
-  const reportDate = new Date().toLocaleDateString("en-AU", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-
   return (
     <div className="space-y-8">
-      {/* Export toolbar (screen only) */}
-      <div className="no-print flex items-center justify-between">
-        <p className="text-sm text-tac-muted">Comparative report — export a client-ready PDF →</p>
-        <button type="button" onClick={handleExport} className="btn-secondary">
-          ⬇ Download PDF
-        </button>
-      </div>
-
-      {/* Report header (PDF only) */}
-      <div className="hidden print:block">
-        <h1 className="text-2xl font-bold text-tac-accent">Shipping Strategy Options Report</h1>
-        <p className="text-sm text-tac-muted">The Aggregate Co · {reportDate}</p>
-      </div>
-
-      <ReconciliationBadge reconciliation={reconciliation} />
-
       <HowToReadCard />
 
       <CurveAnatomy stats={stats} tierLabel={tierLabel} currentThreshold={currentThreshold} />

@@ -56,7 +56,7 @@ export default function TierMixChart({ options, currentFacts }: TierMixChartProp
           <YAxis tick={AXIS_TICK} />
           <Tooltip
             contentStyle={TOOLTIP_STYLE}
-            formatter={(v, name) => [Number(v).toFixed(1), String(name)]}
+            formatter={(v, name) => [String(Math.round(Number(v))), String(name)]}
             cursor={{ fill: "rgba(160, 174, 184, 0.08)" }}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />

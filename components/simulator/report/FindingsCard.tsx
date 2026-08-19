@@ -17,15 +17,28 @@ interface FindingsCardProps {
   monthlyOrders: number | undefined;
 }
 
-/** Which of the two mechanical levers carries the row's net change. */
+/**
+ * Which of the two mechanical levers carries the row's net change.
+ *
+ * Whether orders switched service is read from the switch COUNT, never from the
+ * carrier delta: tiers with equal avgCost, or switches that cancel out, move orders
+ * between services at a carrier delta of exactly $0. Inferring "nothing switched"
+ * from a $0 delta contradicts the switch count printed in the order-impact table.
+ */
 function driverSentence(evaluation: SchemeEvaluation): string {
   const fee = evaluation.shippingRevenueDelta;
   const carrier = -evaluation.carrierSpendDelta;
+  const switched = evaluation.impact.switchedTier;
+
+  if (switched === 0) {
+    return `All of the change is fee revenue (${signedCurrency(fee)}); every order ships on the service it does today, so the carrier bill is unchanged.`;
+  }
+  const orderWord = switched === 1 ? "order lands" : "orders land";
   if (Math.abs(carrier) < 0.005) {
-    return `All of the change is fee revenue (${signedCurrency(fee)}); no order lands on a different service, so the carrier bill is unchanged.`;
+    return `${switched} ${orderWord} on a different service, but those services cost the same to ship — so the carrier bill is unchanged and all of the change is fee revenue (${signedCurrency(fee)}).`;
   }
   const leadFee = Math.abs(fee) >= Math.abs(carrier);
-  return `The change splits into ${signedCurrency(fee)} of fee revenue and ${signedCurrency(carrier)} of carrier cost — ${leadFee ? "fee revenue" : "the carrier bill"} carries it, because ${evaluation.impact.switchedTier.toFixed(0)} orders land on a different service.`;
+  return `The change splits into ${signedCurrency(fee)} of fee revenue and ${signedCurrency(carrier)} of carrier cost — ${leadFee ? "fee revenue" : "the carrier bill"} carries it, because ${switched} ${orderWord} on a different service.`;
 }
 
 export default function FindingsCard({
@@ -49,9 +62,9 @@ export default function FindingsCard({
     );
     const freightShift = freightShiftSentence(e, currentFacts);
     if (freightShift) findings.push(`Freight shift: ${freightShift}`);
-    if (e.impact.newlyPaying >= 0.5 || e.impact.newlyFree >= 0.5) {
+    if (e.impact.newlyPaying > 0 || e.impact.newlyFree > 0) {
       findings.push(
-        `Who changes: ${e.impact.newlyPaying.toFixed(0)} orders that ship free today start paying a fee; ${e.impact.newlyFree.toFixed(0)} orders that pay today start shipping free.`
+        `Who changes: ${e.impact.newlyPaying} orders that ship free today start paying a fee; ${e.impact.newlyFree} orders that pay today start shipping free.`
       );
     }
     if (monthlyOrders !== undefined && e.orderCount > 0) {

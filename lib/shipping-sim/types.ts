@@ -14,11 +14,9 @@ export const TIER_LABELS: Record<CanonicalTier, string> = {
   sameday: "Same Day",
 };
 
-/** Statistics derived from line-item data in a full Shopify export. */
+/** Evidence that a full Shopify export carried usable line-item data. */
 export interface UnitStats {
-  typicalUnitPrice: number; // quantity-weighted median line-item price
   ordersWithUnits: number; // orders carrying line-item data
-  unitShare: { single: number; double: number; threePlus: number }; // share of orders by item count, 0..1
 }
 
 /** A raw order parsed from the Shopify CSV. */
@@ -45,74 +43,10 @@ export interface TierConfig {
 /** A pricing scheme — only the tiers a merchant actually uses are present. */
 export type Scheme = Partial<Record<CanonicalTier, TierConfig>>;
 
-export interface ScenarioResult {
-  shippingRevenue: number;
-  carrierSpend: number;
-  ordersByTier: Record<CanonicalTier, number>;
-  netShippingProfit: number; // shippingRevenue - carrierSpend
-}
-
 export interface Reconciliation {
   actualShippingPaid: number; // Σ shippingPaid from the CSV
   modelledCurrentRevenue: number; // current scheme modelled revenue
   variancePct: number; // |modelled - actual| / actual  (0..1)
-}
-
-export interface CogsContext {
-  cogsPercent: number;
-  grossProductMargin: number; // Σ gross * (1 - cogsPercent); identical both scenarios
-}
-
-export interface Benchmark {
-  current: ScenarioResult;
-  proposed: ScenarioResult;
-  shippingRevenueDelta: number;
-  carrierSpendDelta: number;
-  netProfitDelta: number; // shippingRevenueDelta - carrierSpendDelta
-  reconciliation: Reconciliation;
-  cogsContext?: CogsContext;
-}
-
-export interface TierEconomics {
-  tier: CanonicalTier;
-  count: number;
-  feeRevenue: number;
-  carrierCost: number;
-  net: number; // feeRevenue - carrierCost
-  recoveryRate: number; // feeRevenue / carrierCost (0 when carrierCost is 0)
-}
-
-export interface OrderMovement {
-  gross: number;
-  chosenTier: CanonicalTier;
-  chosenFee: number;
-  landedTier: CanonicalTier;
-  landedFee: number;
-  moved: boolean;
-  netDelta: number; // (landedFee - landedCarrier) - (chosenFee - chosenCarrier)
-}
-
-export interface ThresholdSweepPoint {
-  threshold: number;
-  netShippingProfit: number;
-}
-
-export interface Analysis {
-  benchmark: Benchmark;
-  recoveryCurrent: number;
-  recoveryProposed: number;
-  subsidyCurrent: number;
-  subsidyProposed: number;
-  freeOrdersCurrent: number;
-  freeOrdersProposed: number;
-  tierEconomicsCurrent: TierEconomics[];
-  tierEconomicsProposed: TierEconomics[];
-  movement: OrderMovement[];
-  movedCount: number;
-  thresholdSweep: ThresholdSweepPoint[];
-  optimalThreshold: number;
-  optimalNet: number;
-  netDeltaPerOrder: number;
 }
 
 export interface CurvePercentiles {

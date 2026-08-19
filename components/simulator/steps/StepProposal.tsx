@@ -5,10 +5,17 @@ import TierConfigRow from "../TierConfigRow";
 import InputField from "@/components/shared/InputField";
 import OptionsComparison from "../OptionsComparison";
 import ComparisonReport from "../ComparisonReport";
+import ReconciliationBadge from "../analysis/ReconciliationBadge";
+import ReportHeader from "../report/ReportHeader";
 import { optionColor, ReportOption } from "../report/types";
 import { buildCandidates, evaluateCandidates } from "@/lib/shipping-sim/candidates";
-import { evaluateScheme, thresholdCurve } from "@/lib/shipping-sim/evaluate";
-import { dominantPaidTier } from "@/lib/shipping-sim/scenario";
+import {
+  evaluateScheme,
+  isCurrentSchemeEntered,
+  thresholdCurve,
+} from "@/lib/shipping-sim/evaluate";
+import { dominantTier as dominantTierOf } from "@/lib/shipping-sim/scenario";
+import { buildReconciliation } from "@/lib/shipping-sim/reconcile";
 import { segmentOrders, segmentOutcomes } from "@/lib/shipping-sim/segments";
 import { curveStats } from "@/lib/shipping-sim/curve";
 import {
@@ -43,8 +50,17 @@ export default function StepProposal({
   // Deferred so large-file recomputes don't run inside the Competitor keystroke render.
   const deferredProposedScheme = useDeferredValue(proposedScheme);
 
-  // The tier carrying most paid volume — drives the sensitivity sweep and "Now" markers.
-  const dominantTier = useMemo(() => dominantPaidTier(orders, currentScheme), [orders, currentScheme]);
+  // THE GATE. Step 2 seeds every used tier with {fee: 0, freeThreshold: null} so the
+  // user can page forward, so "the tier exists" does not mean "the user entered it".
+  // Everything below the placeholder is gated on this single predicate — see
+  // isCurrentSchemeEntered for the invariant.
+  const schemeEntered = useMemo(() => isCurrentSchemeEntered(currentScheme), [currentScheme]);
+
+  // The tier carrying most volume — drives the sensitivity sweep and "Now" markers.
+  const dominantTier = useMemo(
+    () => dominantTierOf(orders, currentScheme),
+    [orders, currentScheme]
+  );
 
   // The comparison grid: current + round-number candidates + the competitor benchmark.
   const candidates = useMemo(
@@ -80,24 +96,12 @@ export default function StepProposal({
     [validOrders, currentScheme, dominantTier]
   );
 
-  const reconciliation = useMemo<Reconciliation | null>(() => {
-    if (!currentFacts) return null;
-    const actualShippingPaid = validOrders.reduce((sum, order) => sum + order.shippingPaid, 0);
-    const modelledCurrentRevenue = currentFacts.shippingRevenue;
-    return {
-      actualShippingPaid,
-      modelledCurrentRevenue,
-      variancePct:
-        actualShippingPaid > 0
-          ? Math.abs(modelledCurrentRevenue - actualShippingPaid) / actualShippingPaid
-          : 0,
-    };
-  }, [validOrders, currentFacts]);
-
-  const curve = useMemo(
-    () => thresholdCurve(orders, currentScheme),
-    [orders, currentScheme]
+  const reconciliation = useMemo<Reconciliation | null>(
+    () => (currentFacts ? buildReconciliation(validOrders, currentFacts) : null),
+    [validOrders, currentFacts]
   );
+
+  const curve = useMemo(() => thresholdCurve(orders, currentScheme), [orders, currentScheme]);
 
   // Order-book segments vs the current scheme, and where each candidate moves them.
   const segments = useMemo(() => segmentOrders(orders, currentScheme), [orders, currentScheme]);
@@ -113,8 +117,28 @@ export default function StepProposal({
     [reportOptions, orders, currentScheme]
   );
 
+  if (!schemeEntered) {
+    return (
+      <div className="card border-l-2 border-l-tac-warning">
+        <h3 className="text-lg font-semibold mb-1 text-tac-accent">
+          Enter your current shipping scheme first
+        </h3>
+        <p className="text-sm text-tac-muted">
+          Every service is still set to $0 with no free-shipping threshold, so every
+          candidate would re-price your orders to exactly the same $0 and the whole report
+          would read +$0.00. Go back to <strong>Current state</strong> and enter the fee and
+          free-over line you actually charge on at least one service.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
+      <ReportHeader />
+
+      {reconciliation && <ReconciliationBadge reconciliation={reconciliation} />}
+
       <OptionsComparison
         options={reportOptions}
         currentScheme={currentScheme}
@@ -167,13 +191,12 @@ export default function StepProposal({
         </div>
       </div>
 
-      {currentFacts && reconciliation && (
+      {currentFacts && (
         <ComparisonReport
           options={reportOptions}
           currentFacts={currentFacts}
           currentScheme={currentScheme}
           dominantTier={dominantTier}
-          reconciliation={reconciliation}
           curve={curve}
           stats={stats}
           segments={segments}

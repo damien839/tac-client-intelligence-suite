@@ -42,9 +42,6 @@ function segmentLabel(segment: Segment): string {
   return parts.join(" · ");
 }
 
-/** Counts below this render as no movement — matches the report's display floor. */
-const MOVEMENT_FLOOR = 0.05;
-
 /**
  * How one segment is priced under one option: how many of its orders pay a fee, how
  * many ship free, and how many land on a different service than the customer chose.
@@ -54,16 +51,13 @@ function outcomeSummary(
   baseline: SegmentOutcome | undefined
 ): string {
   if (!outcome) return "no change";
-  const sameSplit =
-    baseline !== undefined && Math.abs(outcome.free - baseline.free) < MOVEMENT_FLOOR;
+  const sameSplit = baseline !== undefined && outcome.free === baseline.free;
   const parts: string[] = [];
-  if (outcome.pays >= MOVEMENT_FLOOR) parts.push(`${outcome.pays.toFixed(0)} pay`);
-  if (outcome.free >= MOVEMENT_FLOOR) parts.push(`${outcome.free.toFixed(0)} free`);
-  if (outcome.switches >= MOVEMENT_FLOOR) {
-    parts.push(`${outcome.switches.toFixed(0)} switch service`);
-  }
+  if (outcome.pays > 0) parts.push(`${outcome.pays} pay`);
+  if (outcome.free > 0) parts.push(`${outcome.free} free`);
+  if (outcome.switches > 0) parts.push(`${outcome.switches} switch service`);
   if (parts.length === 0) return "no change";
-  return sameSplit && outcome.switches < MOVEMENT_FLOOR
+  return sameSplit && outcome.switches === 0
     ? `${parts.join(" · ")} (as today)`
     : parts.join(" · ");
 }

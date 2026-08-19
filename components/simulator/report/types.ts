@@ -12,7 +12,7 @@ export interface ReportOption extends CandidateScheme {
  * grid and in the findings footer so it survives into the printed PDF.
  */
 export const MECHANICAL_CAVEAT =
-  "Assumes order volume and customer behaviour unchanged — more orders paying a fee is shown as pure gain; real-world abandonment risk is not modelled.";
+  "Assumes order volume unchanged — more orders paying a fee is shown as pure gain. The only modelled customer response is switching to a cheaper service when a change makes their current choice irrational; buying more, or not buying at all, is not modelled.";
 
 /** Series hues for candidate rows, assigned by grid position. Readable on dark. */
 export const OPTION_PALETTE = [

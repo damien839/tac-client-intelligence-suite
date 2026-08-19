@@ -39,32 +39,6 @@ function toNumber(value: string | undefined): number {
   return parseFloat(cleaned);
 }
 
-/** Quantity-weighted median of (price, qty) pairs.
- * Sort pairs by price, walk cumulative qty to ceil(totalQty/2).
- * Does NOT materialise the expanded array. */
-function weightedMedianPrice(pairs: Array<{ price: number; qty: number }>): number {
-  if (pairs.length === 0) return 0;
-
-  // Sort by price ascending
-  const sorted = [...pairs].sort((a, b) => a.price - b.price);
-
-  const totalQty = sorted.reduce((sum, p) => sum + p.qty, 0);
-  if (totalQty === 0) return 0;
-
-  const midpoint = Math.ceil(totalQty / 2);
-  let cumulative = 0;
-
-  for (const pair of sorted) {
-    cumulative += pair.qty;
-    if (cumulative >= midpoint) {
-      return pair.price;
-    }
-  }
-
-  // Should never reach here
-  return sorted[sorted.length - 1].price;
-}
-
 /** Parse full-export (line-item grouped) mode. */
 function parseFullExport(
   rows: Record<string, string>[],
@@ -182,39 +156,19 @@ function parseFullExport(
   };
 }
 
-/** Build UnitStats from per-order unit counts and all price/qty pairs. */
+/**
+ * Build UnitStats from per-order unit counts. Its only job now is to signal that
+ * the upload carried usable line items — per-order `units` on each OrderRow is
+ * what the report actually consumes.
+ */
 function buildUnitStats(
   perOrderUnits: number[],
   pairs: Array<{ price: number; qty: number }>,
 ): UnitStats | null {
   if (pairs.length === 0) return null;
-
   const ordersWithUnits = perOrderUnits.length;
   if (ordersWithUnits === 0) return null;
-
-  // unitShare by orders-with-units denominator
-  let single = 0;
-  let double = 0;
-  let threePlus = 0;
-
-  for (const units of perOrderUnits) {
-    if (units === 1) single += 1;
-    else if (units === 2) double += 1;
-    else if (units >= 3) threePlus += 1;
-    // units === 0 contribute to ordersWithUnits count but not to any band
-  }
-
-  const denom = ordersWithUnits;
-
-  return {
-    typicalUnitPrice: weightedMedianPrice(pairs),
-    ordersWithUnits,
-    unitShare: {
-      single: single / denom,
-      double: double / denom,
-      threePlus: threePlus / denom,
-    },
-  };
+  return { ordersWithUnits };
 }
 
 export function parseShippingOrders(csvText: string): ParseResult {
